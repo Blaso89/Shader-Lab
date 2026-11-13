@@ -1,6 +1,15 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const status = document.getElementById("server-status");
+  const live = document.getElementById("mcp-live");
+  const liveLabel = document.getElementById("mcp-live-label");
+  const liveLabels = {
+    unknown: "Live: stato non verificato",
+    starting: "Live: avvio in corso…",
+    connected: "Live: connesso",
+    disconnected: "Live: disconnesso",
+    opening: "Live: apertura opzioni MCP…",
+  };
 
   document.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -8,9 +17,12 @@
     });
   });
 
-  document.getElementById("refresh").addEventListener("click", () => {
-    vscode.postMessage({ command: "refresh" });
-  });
+  const refresh = document.getElementById("refresh");
+  if (refresh) {
+    refresh.addEventListener("click", () => {
+      vscode.postMessage({ command: "refresh" });
+    });
+  }
 
   window.addEventListener("message", (event) => {
     const message = event.data;
@@ -20,6 +32,14 @@
     setText("mcp-config", message.mcpConfigured ? "Allineato" : "Da configurare");
     setText("server-root", message.serverRoot || "Non selezionato");
     setText("mcp-config-path", message.mcpConfigPath || "Non rilevato");
+    const liveState = Object.prototype.hasOwnProperty.call(liveLabels, message.mcpConnectionState)
+      ? message.mcpConnectionState
+      : "unknown";
+    liveLabel.textContent = liveLabels[liveState];
+    live.className = "live-control " + liveState;
+    live.disabled = liveState === "opening";
+    live.setAttribute("aria-label", liveLabels[liveState]);
+    live.title = "Apri le stesse opzioni server MCP mostrate da MCP: List Servers";
     const toolchain = message.pixToolchain || {};
     setText("pix-tool-path", toolchain.pixToolPath || "Autodiscovery");
     setText("dxc-path", toolchain.dxcPath || "Autodiscovery");

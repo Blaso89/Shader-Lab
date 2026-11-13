@@ -30,8 +30,11 @@ che aggiunge lo Shader Lab alla Activity Bar. Per provarla:
 5. Apri Shader Lab dalla Activity Bar e usa Copilot Chat in modalità Agent.
 
 La dashboard seleziona gli input e prepara una richiesta per il tool MCP
-corrispondente in Copilot Chat. L'MCP server resta configurato a livello workspace;
-la dashboard non duplica né sostituisce le funzioni del server.
+corrispondente in Copilot Chat. Il controllo Live osserva il log MCP della finestra,
+ricava l'ID completo usato da VS Code e apre le stesse opzioni server di
+**MCP: List Servers** per `sm6-to-sm5`. Le righe di connessione aggiornano il pallino
+senza aprire pannelli; se il log non esiste ancora, il primo clic apre l'elenco MCP.
+La lettura dipende dal formato dei log della versione VS Code installata.
 
 ## Strumenti esterni (opzionali)
 

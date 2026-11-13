@@ -56,6 +56,15 @@ Il server MCP è quello autonomo `sm6-to-sm5`, non il Ghidra Analysis Manager. S
 richiesta non apre Copilot Chat automaticamente, avviare il server MCP e usare Agent
 Chat manualmente.
 
+Il controllo **Live** osserva il log MCP della finestra VS Code, senza aprire pannelli.
+Dal nome del log ricava l'ID completo del server (ad esempio `mcp.config.ws14.sm6-to-sm5`)
+e apre `workbench.mcp.serverOptions`, lo stesso menu raggiunto selezionando il server in
+**MCP: List Servers**. Il menu presenta **Start Server** o **Arresta server** in base allo
+stato corrente; le righe di connessione aggiornano il pallino. Se il log non esiste ancora,
+il primo clic apre **MCP: List Servers** per individuare e avviare il server. VS Code non
+espone un'API pubblica per questo stato, quindi la lettura del suo log è legata al formato
+generato dalla versione installata.
+
 ## Limiti
 
 DXIL → SPIR-V → HLSL è sperimentale. Il risultato è decompilato, non necessariamente

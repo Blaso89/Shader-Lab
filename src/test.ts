@@ -54,6 +54,73 @@ const { buildPixPrompt, buildPixEventListPrompt, buildPixResourcePrompt } = requ
   buildPixEventListPrompt: (options: Record<string, unknown>) => string;
   buildPixResourcePrompt: (options: Record<string, unknown>) => string;
 };
+type McpConnectionState = "unknown" | "starting" | "connected" | "disconnected";
+const {
+  createMcpServerLogMonitor,
+  findWindowLogDirectory,
+  parseMcpConnectionState,
+  parseMcpServerLogFileName,
+} = require("../vscode-extension/mcp-log-monitor.cjs") as {
+  createMcpServerLogMonitor: (
+    logPath: string,
+    serverName: string,
+    onState: (state: McpConnectionState, definitionId: string | undefined) => void,
+    onError?: (error: Error) => void,
+  ) => { dispose: () => void };
+  findWindowLogDirectory: (logPath: string) => string | undefined;
+  parseMcpConnectionState: (contents: string) => McpConnectionState | undefined;
+  parseMcpServerLogFileName: (fileName: string, serverName: string) => string | undefined;
+};
+assert.equal(
+  parseMcpServerLogFileName("mcpServer.mcp.config.ws14.sm6-to-sm5.log", "sm6-to-sm5"),
+  "mcp.config.ws14.sm6-to-sm5",
+  "il log rivela l'ID MCP completo usato da VS Code",
+);
+assert.equal(parseMcpServerLogFileName("mcpServer.other.log", "sm6-to-sm5"), undefined);
+assert.equal(parseMcpConnectionState("Stato connessione: Arrestato\n"), "disconnected");
+assert.equal(parseMcpConnectionState("Stato connessione: Avvio\n"), "starting");
+assert.equal(parseMcpConnectionState("Stato connessione: In esecuzione\n"), "connected");
+assert.equal(parseMcpConnectionState("Connection state: Stopped\n"), "disconnected");
+assert.equal(parseMcpConnectionState("Discovered 11 tools\n"), "connected");
+const monitorRoot = fs.mkdtempSync(path.join(os.tmpdir(), "shader-lab-mcp-log-"));
+const windowLogDirectory = path.join(monitorRoot, "window2");
+const extensionLogPath = path.join(windowLogDirectory, "exthost", "local-tools.shader-lab");
+const serverLogPath = path.join(windowLogDirectory, "mcpServer.mcp.config.ws14.sm6-to-sm5.log");
+fs.mkdirSync(extensionLogPath, { recursive: true });
+fs.writeFileSync(serverLogPath, "Stato connessione: Arrestato\n");
+assert.equal(findWindowLogDirectory(extensionLogPath), windowLogDirectory);
+let resolveRunning!: () => void;
+let rejectRunning!: (error: Error) => void;
+const runningObserved = new Promise<void>((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error("timeout monitor stato MCP")), 1500);
+  resolveRunning = () => {
+    clearTimeout(timeout);
+    resolve();
+  };
+  rejectRunning = (error) => {
+    clearTimeout(timeout);
+    reject(error);
+  };
+});
+let observedDefinitionId: string | undefined;
+const logMonitor = createMcpServerLogMonitor(
+  extensionLogPath,
+  "sm6-to-sm5",
+  (state, definitionId) => {
+    observedDefinitionId = definitionId;
+    if (state === "connected") resolveRunning();
+  },
+  rejectRunning,
+);
+try {
+  assert.equal(observedDefinitionId, "mcp.config.ws14.sm6-to-sm5");
+  fs.appendFileSync(serverLogPath, "Stato connessione: In esecuzione\n");
+  await runningObserved;
+  assert.equal(observedDefinitionId, "mcp.config.ws14.sm6-to-sm5");
+} finally {
+  logMonitor.dispose();
+  fs.rmSync(monitorRoot, { recursive: true, force: true });
+}
 const fake = [
   '; Note: shader requires additional functionality:',
   ';       64-bit Atomics on Typed Resources',

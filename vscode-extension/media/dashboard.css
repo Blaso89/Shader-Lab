@@ -27,6 +27,13 @@ h1 { margin: 4px 0; font-size: 1.35em; }
 .status.ready { color: var(--ok); border-color: var(--ok); }
 .status.warning { color: var(--warn); border-color: var(--warn); }
 .status.pending { color: var(--muted); }
+.live-control { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: transparent; font-size: .82em; }
+.live-control:hover { background: var(--vscode-toolbar-hoverBackground); }
+.live-control:disabled { cursor: wait; opacity: .8; }
+.live-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--muted); }
+.live-control.starting .live-dot, .live-control.opening .live-dot { background: var(--warn); }
+.live-control.connected .live-dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.live-control.disconnected .live-dot { background: var(--vscode-errorForeground); }
 .config-button { width: 100%; margin-top: 10px; }
 
 .notice {

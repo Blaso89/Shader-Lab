@@ -2,10 +2,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vscode = require("vscode");
 const { choosePixCapture, buildPixPrompt, buildPixEventListPrompt, buildPixResourcePrompt } = require("./pix.cjs");
+const { createMcpServerLogMonitor } = require("./mcp-log-monitor.cjs");
 const {
   getConfiguredServer,
   isServerConfigured,
   resolveServerEntryFromDirectory,
+  SERVER_ID,
   updateVsCodeUserMcpConfig,
   vsCodeUserMcpConfigPath,
 } = require("./mcp-config");
@@ -14,6 +16,14 @@ const VIEW_ID = "sm6ToSm5.dashboard";
 const PIX_VIEW_ID = "sm6ToSm5.pix";
 const SERVER_ROOT_KEY = "sm6ToSm5.serverRoot";
 const PIX_TOOLCHAIN_KEY = "sm6ToSm5.pixToolchain";
+let mcpConnectionState = "unknown";
+let mcpServerDefinitionId;
+const viewProviders = new Set();
+
+function setMcpConnectionState(state) {
+  mcpConnectionState = state;
+  for (const provider of viewProviders) provider.postStatus();
+}
 
 function activate(context) {
   const developmentRoot = path.basename(context.extensionPath).toLowerCase() === "vscode-extension"
@@ -34,6 +44,27 @@ function activate(context) {
     vscode.commands.registerCommand("sm6ToSm5.openDashboard", () =>
       vscode.commands.executeCommand("workbench.view.extension.sm6ToSm5")),
   );
+
+  let logMonitorWarningShown = false;
+  const reportLogMonitorError = (error) => {
+    if (logMonitorWarningShown) return;
+    logMonitorWarningShown = true;
+    const detail = error instanceof Error ? error.message : String(error);
+    void vscode.window.showWarningMessage(`Shader Lab: impossibile osservare lo stato MCP: ${detail}`);
+  };
+  try {
+    context.subscriptions.push(createMcpServerLogMonitor(
+      context.logUri.fsPath,
+      SERVER_ID,
+      (state, definitionId) => {
+        mcpServerDefinitionId = definitionId;
+        setMcpConnectionState(state);
+      },
+      reportLogMonitorError,
+    ));
+  } catch (error) {
+    reportLogMonitorError(error);
+  }
 }
 
 class ShaderLabViewProvider {
@@ -51,6 +82,8 @@ class ShaderLabViewProvider {
     }
     this.serverRoot = context.globalState.get(SERVER_ROOT_KEY) || configuredServer?.root || developmentRoot;
     this.serverEntry = this.serverRoot ? path.join(this.serverRoot, "dist", "index.js") : undefined;
+    viewProviders.add(this);
+    context.subscriptions.push({ dispose: () => viewProviders.delete(this) });
   }
 
   resolveWebviewView(view) {
@@ -72,6 +105,7 @@ class ShaderLabViewProvider {
       command: "status",
       serverReady: Boolean(this.serverEntry && fs.existsSync(this.serverEntry)),
       mcpConfigured: Boolean(this.serverEntry && isServerConfigured(this.mcpConfig, this.serverEntry)),
+      mcpConnectionState,
       serverRoot: this.serverRoot || "",
       mcpConfigPath: this.mcpConfig,
       pixToolchain: this.getPixToolchain(),
@@ -87,6 +121,9 @@ class ShaderLabViewProvider {
       switch (message.command) {
         case "refresh":
           this.postStatus();
+          return;
+        case "openMcpServerOptions":
+          await this.openMcpServerOptions();
           return;
         case "analyzeHlsl":
           await this.analyzeHlsl();
@@ -141,6 +178,34 @@ class ShaderLabViewProvider {
     }
   }
 
+  async openMcpServerOptions() {
+    if (!this.serverEntry || !fs.existsSync(this.serverEntry) || !isServerConfigured(this.mcpConfig, this.serverEntry)) {
+      setMcpConnectionState("unknown");
+      throw new Error("Server MCP non configurato o non compilato. Configuralo prima e ricarica la finestra.");
+    }
+
+    const commandId = mcpServerDefinitionId
+      ? "workbench.mcp.serverOptions"
+      : "workbench.mcp.listServer";
+    const commands = await vscode.commands.getCommands(true);
+    if (!commands.includes(commandId)) {
+      setMcpConnectionState("unknown");
+      throw new Error("Questa versione di VS Code non espone il menu MCP. Usa MCP: List Servers.");
+    }
+
+    const previousState = mcpConnectionState;
+    setMcpConnectionState("opening");
+    try {
+      if (mcpServerDefinitionId) {
+        await vscode.commands.executeCommand(commandId, mcpServerDefinitionId);
+      } else {
+        await vscode.commands.executeCommand(commandId);
+      }
+    } finally {
+      if (mcpConnectionState === "opening") setMcpConnectionState(previousState);
+    }
+  }
+
   async configureMcp() {
     const selected = await vscode.window.showOpenDialog({
       canSelectFiles: false,
@@ -156,6 +221,7 @@ class ShaderLabViewProvider {
     const result = updateVsCodeUserMcpConfig(this.mcpConfig, root, entry);
     this.serverRoot = root;
     this.serverEntry = entry;
+    setMcpConnectionState("unknown");
     await this.context.globalState.update(SERVER_ROOT_KEY, root);
     this.postStatus();
     const message = result.backupPath
@@ -515,7 +581,7 @@ class ShaderLabViewProvider {
     <div class="eyebrow">ANALISI LOCALE · D3D12</div>
     <h1 class="title-row"><span>Cattura PIX</span><span class="version-badge" aria-label="Versione plugin ${this.extensionVersion}">v${this.extensionVersion}</span></h1>
     <p>Analisi statica, estrazione PSO/shader e accesso mirato agli eventi o ai render target.</p>
-    <div class="status-row"><span id="server-status" class="status pending">Verifica MCP…</span></div>
+    <div class="status-row"><span id="server-status" class="status pending">Verifica MCP…</span><button id="mcp-live" class="live-control unknown" data-action="openMcpServerOptions" type="button" title="Apri le stesse opzioni server MCP mostrate da MCP: List Servers"><span class="live-dot" aria-hidden="true"></span><span id="mcp-live-label" aria-live="polite">Live: stato non verificato</span></button></div>
   </header>
   <section class="notice">
     <strong>Toolchain portabile</strong>
@@ -576,6 +642,7 @@ class ShaderLabViewProvider {
     <p>Analisi e conversione sperimentale SM6 → SM5</p>
     <div class="status-row">
       <span id="server-status" class="status pending">Verifica MCP…</span>
+      <button id="mcp-live" class="live-control unknown" data-action="openMcpServerOptions" type="button" title="Apri le stesse opzioni server MCP mostrate da MCP: List Servers"><span class="live-dot" aria-hidden="true"></span><span id="mcp-live-label" aria-live="polite">Live: stato non verificato</span></button>
       <button id="refresh" class="icon-button" title="Aggiorna stato" aria-label="Aggiorna stato">↻</button>
     </div>
     <button class="secondary config-button" data-action="configureMcp">Configura server MCP VS Code</button>
