@@ -1,0 +1,78 @@
+:root {
+  --line: var(--vscode-panel-border);
+  --muted: var(--vscode-descriptionForeground);
+  --ok: var(--vscode-testing-iconPassed);
+  --warn: var(--vscode-editorWarning-foreground);
+  --radius: 6px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  padding: 12px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+
+.hero { padding: 2px 0 12px; }
+.eyebrow { color: var(--vscode-textLink-foreground); font-size: .72em; font-weight: 700; letter-spacing: .12em; }
+h1 { margin: 4px 0; font-size: 1.35em; }
+.hero p, .step-copy p, footer p { margin: 3px 0 0; color: var(--muted); line-height: 1.45; }
+.status-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.status { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: .82em; }
+.status.ready { color: var(--ok); border-color: var(--ok); }
+.status.warning { color: var(--warn); border-color: var(--warn); }
+.status.pending { color: var(--muted); }
+.config-button { width: 100%; margin-top: 10px; }
+
+.notice {
+  margin: 8px 0 16px;
+  padding: 10px 11px;
+  border: 1px solid var(--vscode-inputValidation-warningBorder, var(--line));
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--vscode-editor-background);
+}
+.notice p { margin: 5px 0 0; color: var(--muted); font-size: .9em; line-height: 1.45; }
+
+.section { margin: 18px 0; }
+h2 { margin: 0 0 8px; color: var(--muted); font-size: .78em; letter-spacing: .08em; text-transform: uppercase; }
+.step-card {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  margin: 7px 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--vscode-editor-background);
+}
+.step-number { color: var(--vscode-textLink-foreground); font-size: .85em; font-weight: 700; padding-top: 2px; }
+.step-copy h3 { margin: 0; font-size: .95em; font-weight: 600; }
+.step-copy p { font-size: .82em; }
+button {
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { background: var(--vscode-button-hoverBackground); }
+button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.step-card button { grid-column: 2; justify-self: start; margin-top: 3px; }
+.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.button-grid { display: grid; gap: 6px; }
+.icon-button { min-width: 28px; padding: 3px 7px; color: var(--vscode-foreground); background: transparent; border-color: var(--line); }
+.kv { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .88em; }
+.kv span { color: var(--muted); }
+.kv strong { text-align: right; overflow-wrap: anywhere; }
+footer { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--line); }
+.link-button { padding: 0; color: var(--vscode-textLink-foreground); background: transparent; text-align: left; }
+.link-button:hover { color: var(--vscode-textLink-activeForeground); background: transparent; text-decoration: underline; }
+footer p { font-size: .8em; }

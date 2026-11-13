@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.vscode/
+.bridgecode/
+d3d12on11/
+samples/
+
+*.wpix
+*.dxil
+*.cso
+*.bin
+*.log
+*.vsix
+!sm6-to-sm5-shader-lab-0.1.2.vsix
