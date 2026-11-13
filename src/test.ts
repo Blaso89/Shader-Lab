@@ -224,7 +224,16 @@ try {
   assert.equal(queueEvents.totalMatches, 1);
   assert.equal(queueEvents.events[0].globalId, 34);
   assert.equal(queueEvents.queueLabelSource, "user_supplied");
-  assert.equal(queueEvents.queueIdSource, "event_list_queue_id_column");
+  assert.equal(queueEvents.queueIdFilterSource, "event_list_queue_id_column_exact_match");
+  assert.equal(queueEvents.queueIdSemantics, "row_local_identifier");
+
+  const drawEvents = await listPixEvents({
+    pixPath: capturePath,
+    queueLabel: "Graphics Queue 1",
+    eventListPath,
+    contains: "draw",
+  });
+  assert.equal(drawEvents.totalMatches, 2, "queue label does not implicitly filter the Queue ID column");
 
   let resourceExportCalls = 0;
   await assert.rejects(() => exportPixDrawResource({
@@ -326,7 +335,7 @@ assert.ok(fullPixPrompt.includes('"pixToolPath":"C:\\\\Program Files\\\\Microsof
 assert.match(fullPixPrompt, /non caricare la cattura/);
 const eventListPrompt = buildPixEventListPrompt({ pixPath: "capture.wpix", queueId: 70 });
 assert.match(eventListPrompt, /list_pix_events/);
-assert.match(eventListPrompt, /non Global ID/);
+assert.match(eventListPrompt, /non identifica la queue/);
 const resourcePrompt = buildPixResourcePrompt({ pixPath: "capture.wpix", globalId: 34, queueId: 70 });
 assert.match(resourcePrompt, /export_pix_draw_resource/);
 assert.match(resourcePrompt, /stessa riga/);

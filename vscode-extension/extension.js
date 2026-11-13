@@ -40,6 +40,7 @@ class ShaderLabViewProvider {
   constructor(context, developmentRoot, isPixView = false) {
     this.context = context;
     this.isPixView = isPixView;
+    this.extensionVersion = context.extension.packageJSON.version;
     this.mcpConfig = vsCodeUserMcpConfigPath(vscode.env.appName, context.globalStorageUri.fsPath);
     let configuredServer;
     try {
@@ -264,12 +265,6 @@ class ShaderLabViewProvider {
         placeHolder: "Graphics Queue 1 (3D Queue (GPU 0))",
       });
       if (queueName?.trim()) args.queueName = queueName.trim();
-      const queueId = await vscode.window.showInputBox({
-        prompt: "Queue ID numerico dalla colonna Queue ID della stessa event list (non Global ID); lascia vuoto per non filtrare.",
-        placeHolder: "70",
-        validateInput: (value) => value.trim() && !/^\d+$/.test(value.trim()) ? "Inserisci un intero non negativo." : undefined,
-      });
-      if (queueId?.trim()) args.queueId = Number(queueId.trim());
     }
 
     const confirmed = await vscode.window.showWarningMessage(
@@ -323,10 +318,14 @@ class ShaderLabViewProvider {
   async listPixEvents() {
     const file = await choosePixCapture();
     if (!file) return;
-    const queueId = await this.askPixInteger("Inserisci il Queue ID numerico dalla event list PIX (non Global ID).", "70");
-    if (queueId === null) return;
     const eventList = await this.chooseEventList();
     if (!eventList) return;
+    const queueIdText = await vscode.window.showInputBox({
+      prompt: "Filtro facoltativo per l'ID esatto di una riga (colonna Queue ID); lascialo vuoto per elencare gli eventi del file.",
+      placeHolder: "70",
+      validateInput: (value) => value.trim() && !/^\d+$/.test(value.trim()) ? "Inserisci un intero non negativo." : undefined,
+    });
+    if (queueIdText === undefined) return;
     const queueLabel = await vscode.window.showInputBox({
       prompt: "Etichetta opzionale copiata dalla UI PIX; è solo un'attestazione dell'utente.",
       placeHolder: "Graphics Queue 1",
@@ -340,7 +339,7 @@ class ShaderLabViewProvider {
 
     await this.openChat(buildPixEventListPrompt({
       pixPath: file,
-      queueId,
+      queueId: queueIdText.trim() ? Number(queueIdText.trim()) : undefined,
       queueLabel: queueLabel.trim() || undefined,
       eventListPath: eventList.eventListPath,
       contains: contains.trim() || undefined,
@@ -509,12 +508,12 @@ class ShaderLabViewProvider {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="${style}" rel="stylesheet">
-  <title>Cattura PIX - Shader Lab</title>
+  <title>Cattura PIX - Shader Lab v${this.extensionVersion}</title>
 </head>
 <body>
   <header class="hero">
     <div class="eyebrow">ANALISI LOCALE · D3D12</div>
-    <h1>Cattura PIX</h1>
+    <h1 class="title-row"><span>Cattura PIX</span><span class="version-badge" aria-label="Versione plugin ${this.extensionVersion}">v${this.extensionVersion}</span></h1>
     <p>Analisi statica, estrazione PSO/shader e accesso mirato agli eventi o ai render target.</p>
     <div class="status-row"><span id="server-status" class="status pending">Verifica MCP…</span></div>
   </header>
@@ -543,7 +542,7 @@ class ShaderLabViewProvider {
     </article>
     <article class="step-card">
       <div class="step-number">02</div>
-      <div class="step-copy"><h3>Elenco eventi per queue</h3><p>Filtra le righe per Queue ID numerico; l'etichetta Graphics Queue 1 resta una verifica visiva dell'utente.</p></div>
+      <div class="step-copy"><h3>Elenco eventi</h3><p>Esamina gli eventi del file o filtra per Queue ID di una singola riga; il Queue ID non identifica la queue.</p></div>
       <button class="secondary" data-action="listPixEvents">Elenca eventi</button>
     </article>
     <article class="step-card">
@@ -554,7 +553,7 @@ class ShaderLabViewProvider {
   </section>
   <section class="section">
     <h2>Note operative</h2>
-    <p class="muted-copy">La modalità completa scrive solo nella cartella output e può avviare un replay/export tramite pixtool. La cattura originale resta intatta; il C++ esportato non viene eseguito. Pixtool esporta l'event list senza filtro queue: Shader Lab applica il filtro numerico Queue ID alle righe e non presume che l'ID corrisponda al nome mostrato in UI.</p>
+    <p class="muted-copy">La modalità completa scrive solo nella cartella output e può avviare un replay/export tramite pixtool. La cattura originale resta intatta; il C++ esportato non viene eseguito. Pixtool esporta l'event list senza filtro queue: Queue ID identifica una singola riga/evento, non la queue mostrata in UI.</p>
   </section>
   <footer><button class="link-button" data-action="configureMcp">Configura server MCP VS Code</button></footer>
   <script nonce="${nonce}" src="${script}"></script>
@@ -568,12 +567,12 @@ class ShaderLabViewProvider {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="${style}" rel="stylesheet">
-  <title>SM6 to SM5 Shader Lab</title>
+  <title>SM6 to SM5 Shader Lab v${this.extensionVersion}</title>
 </head>
 <body>
   <header class="hero">
     <div class="eyebrow">UNREAL · D3D12 → D3D11</div>
-    <h1>Shader Lab</h1>
+    <h1 class="title-row"><span>Shader Lab</span><span class="version-badge" aria-label="Versione plugin ${this.extensionVersion}">v${this.extensionVersion}</span></h1>
     <p>Analisi e conversione sperimentale SM6 → SM5</p>
     <div class="status-row">
       <span id="server-status" class="status pending">Verifica MCP…</span>

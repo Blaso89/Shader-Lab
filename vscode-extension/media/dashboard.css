@@ -19,6 +19,8 @@ body {
 .hero { padding: 2px 0 12px; }
 .eyebrow { color: var(--vscode-textLink-foreground); font-size: .72em; font-weight: 700; letter-spacing: .12em; }
 h1 { margin: 4px 0; font-size: 1.35em; }
+.title-row { display: flex; align-items: baseline; gap: 8px; }
+.version-badge { color: var(--muted); font-size: .62em; font-weight: 500; letter-spacing: .03em; }
 .hero p, .step-copy p, footer p { margin: 3px 0 0; color: var(--muted); line-height: 1.45; }
 .status-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .status { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: .82em; }

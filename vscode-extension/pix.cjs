@@ -34,7 +34,7 @@ function buildPixPrompt(file, options = {}) {
 function buildPixEventListPrompt(options) {
   return (
     `Chiama il tool MCP \`list_pix_events\` con ${JSON.stringify(options)}. ` +
-    "Il valore queueId è il numero nella colonna Queue ID, non Global ID. " +
+    "Queue ID è il numero della riga/evento nella queue, non identifica la queue; ometti queueId per elencare tutti gli eventi nel file selezionato. " +
     "Separa l'etichetta UI dichiarata dall'utente dai dati verificati nella event list; non attribuire all'intera cattura una queue."
   );
 }

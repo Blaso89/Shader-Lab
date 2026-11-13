@@ -21,7 +21,7 @@ export interface PixEventList {
 
 export interface PixEventQuery {
   pixPath: string;
-  queueId: number;
+  queueId?: number;
   queueLabel?: string;
   contains?: string;
   offset?: number;
@@ -30,8 +30,9 @@ export interface PixEventQuery {
   pixToolPath?: string;
 }
 
-export interface PixDrawResourceExport extends PixEventQuery {
+export interface PixDrawResourceExport extends Omit<PixEventQuery, "queueId"> {
   globalId: number;
+  queueId: number;
   outputDir: string;
   rtvIndex?: number;
 }
@@ -155,21 +156,24 @@ async function exportEventListFile(
 }
 
 function filterEvents(events: PixEventList, options: PixEventQuery) {
-  if (!events.queueIds.includes(options.queueId)) {
+  if (options.queueId !== undefined && !events.queueIds.includes(options.queueId)) {
     throw new Error(`Queue ID ${options.queueId} non trovato nella colonna Queue ID dell'event list.`);
   }
-  const queueEvents = events.rows.filter((event) => event.queueId === options.queueId);
+  const rowMatches = options.queueId === undefined
+    ? events.rows
+    : events.rows.filter((event) => event.queueId === options.queueId);
   const contains = options.contains?.trim().toLowerCase();
   const matches = contains
-    ? queueEvents.filter((event) => event.name.toLowerCase().includes(contains))
-    : queueEvents;
+    ? rowMatches.filter((event) => event.name.toLowerCase().includes(contains))
+    : rowMatches;
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 50;
   return {
-    queueId: options.queueId,
+    queueId: options.queueId ?? null,
+    queueIdSemantics: "row_local_identifier",
     queueLabel: options.queueLabel ?? null,
     queueLabelSource: options.queueLabel ? "user_supplied" : null,
-    queueIdSource: "event_list_queue_id_column",
+    queueIdFilterSource: options.queueId === undefined ? null : "event_list_queue_id_column_exact_match",
     eventListSource: options.eventListPath ? "user_exported_event_list" : "pixtool_unfiltered_event_list",
     eventListCaptureBinding: options.eventListPath ? "not_verified" : "exported_from_requested_capture",
     eventListRows: events.eventRows,
@@ -205,7 +209,7 @@ async function withEventList<T>(
 }
 
 export async function listPixEvents(options: PixEventQuery, runner: PixRunner = run) {
-  if (!Number.isSafeInteger(options.queueId) || options.queueId < 0) {
+  if (options.queueId !== undefined && (!Number.isSafeInteger(options.queueId) || options.queueId < 0)) {
     throw new Error("queueId deve essere un intero non negativo tratto dalla colonna Queue ID di PIX.");
   }
   const offset = options.offset ?? 0;

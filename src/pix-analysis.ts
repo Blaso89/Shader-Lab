@@ -13,7 +13,6 @@ export interface PixDeepAnalysisOptions {
   eventListPath?: string;
   pixExportDir?: string;
   queueName?: string;
-  queueId?: number;
   pixToolPath?: string;
   dxcPath?: string;
   powerShellPath?: string;
@@ -54,11 +53,9 @@ export interface PixDeepAnalysisReport {
   pixPath: string;
   outputDir: string;
   queueName: string | null;
-  queueId: number | null;
   queueNameVerifiedByFile: false;
-  queueIdVerifiedByEventList: boolean;
   staticScan: PixCaptureReport;
-  eventList: (Omit<EventListInfo, "rows"> & { selectedEventRows: number }) | null;
+  eventList: Omit<EventListInfo, "rows"> | null;
   eventExportWarning: string | null;
   psoCount: number;
   shaderPayloadCount: number;
@@ -235,7 +232,7 @@ async function exportEventList(
   if (result.code === 0 && fs.existsSync(eventPath)) {
     return {
       succeeded: true,
-      warning: "Event list esportata senza filtro queue; i riferimenti sono attribuiti solo usando la colonna Queue ID, mai l'etichetta UI.",
+      warning:       "Event list esportata senza filtro queue; i riferimenti PSO derivano dalle righe esportate e l'etichetta UI non è verificata dal file.",
     };
   }
   return {
@@ -348,9 +345,7 @@ function markdownReport(report: PixDeepAnalysisReport): string {
     "",
     `- Cattura originale non modificata: \`${report.pixPath}\``,
     `- Etichetta queue UI: ${report.queueName ?? "non specificata"} (non verificata dal file event list)`,
-    `- Queue ID numerico: ${report.queueId ?? "non filtrato"} (verificato nella colonna Queue ID: ${report.queueIdVerifiedByEventList ? "sì" : "no"})`,
     `- Eventi: ${report.eventList?.eventRows ?? "non disponibili"}`,
-    `- Eventi selezionati per Queue ID: ${report.eventList?.selectedEventRows ?? "non disponibili"}`,
     `- PSO referenziati: ${report.eventList?.psoIds.length ?? "non disponibili"}`,
     `- PSO estratti dall'export C++: ${report.psoCount}`,
     `- Payload shader: ${report.shaderPayloadCount}; container unici: ${report.uniqueShaderCount}`,
@@ -366,8 +361,8 @@ function markdownReport(report: PixDeepAnalysisReport): string {
     "## Limiti",
     "- IPSO/shader sono stati estratti dall'export C++ PIX, non decodificando direttamente il formato .wpix.",
     "- I verdetti sono analisi statica di DXC e non provano equivalenza visiva o compatibilità runtime D3D11.",
-    "- Le statistiche dell'event list non sono filtrate da pixtool per etichetta queue; il filtro per Queue ID, se richiesto, è applicato alle righe esportate.",
-    "- Il Queue ID non prova da solo l'etichetta mostrata nella UI PIX; questa resta un'attestazione dell'utente.",
+    "- Pixtool non filtra per queue. Il campo Queue ID identifica una riga/evento nella queue, non la queue stessa.",
+    "- L'etichetta queue mostrata nella UI PIX resta un'attestazione dell'utente; un event list manuale non prova la propria cattura o queue di origine.",
   ];
   if (report.eventExportWarning) lines.push("", `Avviso export eventi: ${report.eventExportWarning}`);
   if (report.disassemblyFailures.length) lines.push("", "Disassemblati non riusciti:", ...report.disassemblyFailures.map((failure) => `- ${failure}`));
@@ -381,9 +376,6 @@ export async function analyzePixDeep(options: PixDeepAnalysisOptions): Promise<P
   if (!pixPath.toLowerCase().endsWith(".wpix")) throw new Error("pixPath deve indicare un file .wpix.");
   if (!fs.existsSync(pixPath) || !fs.statSync(pixPath).isFile()) throw new Error(`Cattura PIX non trovata: ${pixPath}`);
   if (path.resolve(outputDir) === pixPath) throw new Error("La cartella output non può essere il file .wpix.");
-  if (options.queueId !== undefined && (!Number.isSafeInteger(options.queueId) || options.queueId < 0)) {
-    throw new Error("queueId deve essere un intero non negativo tratto dalla colonna Queue ID.");
-  }
   fs.mkdirSync(outputDir, { recursive: true });
 
   const staticScan = await analyzePixCapture(pixPath);
@@ -421,17 +413,10 @@ export async function analyzePixDeep(options: PixDeepAnalysisOptions): Promise<P
     }
 
     const rawEventList = eventPath ? readEventList(eventPath) : null;
-    const selectedEventRows = rawEventList
-      ? rawEventList.rows.filter((event) => options.queueId === undefined || event.queueId === options.queueId)
-      : [];
-    if (options.queueId !== undefined && rawEventList && selectedEventRows.length === 0) {
-      throw new Error(`Queue ID ${options.queueId} non trovato nell'event list; analisi interrotta per evitare attribuzioni errate.`);
-    }
     const eventList = rawEventList ? {
       path: rawEventList.path,
       eventRows: rawEventList.eventRows,
-      selectedEventRows: selectedEventRows.length,
-      psoIds: [...new Set(selectedEventRows.flatMap((event) => event.psoId === null ? [] : [event.psoId]))].sort((a, b) => a - b),
+      psoIds: rawEventList.psoIds,
       queueIds: rawEventList.queueIds,
     } : null;
     const extracted = await runShaderExtraction(exportDirectory, shadersDirectory, options.powerShellPath);
@@ -486,9 +471,7 @@ export async function analyzePixDeep(options: PixDeepAnalysisOptions): Promise<P
       pixPath,
       outputDir,
       queueName: options.queueName ?? null,
-      queueId: options.queueId ?? null,
       queueNameVerifiedByFile: false,
-      queueIdVerifiedByEventList: options.queueId !== undefined && selectedEventRows.length > 0,
       staticScan,
       eventList,
       eventExportWarning,

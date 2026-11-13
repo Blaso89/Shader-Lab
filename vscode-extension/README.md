@@ -44,8 +44,8 @@ nel VSIX. Il server MCP resta un componente separato: su un nuovo PC selezionare
 del progetto compilato con **Configura server MCP VS Code**.
 
 Le azioni **Elenca eventi** e **Verifica ed esporta PNG** usano rispettivamente i tool MCP
-`list_pix_events` ed `export_pix_draw_resource`. Inserire il numero dalla colonna `Queue ID`
-(distinto dal `Global ID`); l'etichetta UI, ad esempio Graphics Queue 1, è registrata come
+`list_pix_events` ed `export_pix_draw_resource`. `Queue ID` è l'ID della riga/evento nella queue,
+non un identificatore della queue; l'etichetta UI, ad esempio Graphics Queue 1, è registrata come
 attestazione dell'utente e non viene dedotta dal CSV. Per esportare una risorsa, il server
 verifica sulla stessa riga che il Global ID sia unico, il Queue ID corrisponda e l'evento sia
 una draw prima di chiamare pixtool. Se viene fornito un event list manuale, la sua
@@ -65,6 +65,6 @@ l'equivalenza visiva o l'integrazione con l'engine.
 
 La scansione statica `.wpix` è limitata a header e blocchi. L'analisi completa usa
 l'export C++ documentato da PIX, non decodifica direttamente il formato `.wpix`.
-L'event list generata da pixtool è non filtrata e viene filtrata localmente per Queue ID;
-un export manuale potrebbe provenire da un'altra cattura. I verdetti shader sono statici
+L'event list generata da pixtool è non filtrata; il Queue ID può selezionare una singola riga,
+non filtrare la queue. Un export manuale potrebbe provenire da un'altra cattura o queue. I verdetti shader sono statici
 e non dimostrano equivalenza visiva o compatibilità runtime.
