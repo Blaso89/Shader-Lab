@@ -45,11 +45,14 @@ assert.equal(bad.filter((f) => f.code === "W001").length, 1, "WaveSize/commenti 
 import { analyzeDisasm } from "./dxil-analyzer.js";
 import { postprocessHlsl } from "./hlsl-post.js";
 import { analyzeSource, DEFAULT_LIMITS, findPixTool, resolveLimits, type ByteSource } from "./pix-capture.js";
+import { exportPixDrawResource, listPixEvents, parsePixEventListText } from "./pix-events.js";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { buildPixPrompt } = require("../vscode-extension/pix.cjs") as {
-  buildPixPrompt: (file: string, options?: Record<string, string>) => string;
+const { buildPixPrompt, buildPixEventListPrompt, buildPixResourcePrompt } = require("../vscode-extension/pix.cjs") as {
+  buildPixPrompt: (file: string, options?: Record<string, unknown>) => string;
+  buildPixEventListPrompt: (options: Record<string, unknown>) => string;
+  buildPixResourcePrompt: (options: Record<string, unknown>) => string;
 };
 const fake = [
   '; Note: shader requires additional functionality:',
@@ -192,6 +195,123 @@ try {
   fs.rmSync(pixToolPathDirectory, { recursive: true, force: true });
 }
 
+// ---- event list PIX: parsing quotato e gate Global ID / Queue ID prima del save-resource
+const pixEventsDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "shaderlab-pix-events-test-"));
+try {
+  const capturePath = path.join(pixEventsDirectory, "capture.wpix");
+  const eventListPath = path.join(pixEventsDirectory, "events.csv");
+  const pixToolPath = path.join(pixEventsDirectory, "pixtool.exe");
+  fs.writeFileSync(capturePath, "capture");
+  fs.writeFileSync(pixToolPath, "");
+  fs.writeFileSync(eventListPath, [
+    "Global ID,Queue ID,Name",
+    '34,70,"DrawIndexedInstanced(6, 1, 0, 0, 0)"',
+    '35,71,"DrawInstanced(3, 1, 0, 0)"',
+    '36,70,"SetPipelineState(obj#1234)"',
+  ].join("\r\n"), "utf8");
+
+  const parsedEvents = parsePixEventListText(fs.readFileSync(eventListPath, "utf8"), eventListPath);
+  assert.equal(parsedEvents.rows[0].name, "DrawIndexedInstanced(6, 1, 0, 0, 0)", "CSV quoted commas are preserved");
+  assert.deepEqual(parsedEvents.queueIds, [70, 71]);
+
+  const queueEvents = await listPixEvents({
+    pixPath: capturePath,
+    queueId: 70,
+    queueLabel: "Graphics Queue 1",
+    eventListPath,
+    contains: "draw",
+  });
+  assert.equal(queueEvents.totalMatches, 1);
+  assert.equal(queueEvents.events[0].globalId, 34);
+  assert.equal(queueEvents.queueLabelSource, "user_supplied");
+  assert.equal(queueEvents.queueIdSource, "event_list_queue_id_column");
+
+  let resourceExportCalls = 0;
+  await assert.rejects(() => exportPixDrawResource({
+    pixPath: capturePath,
+    globalId: 34,
+    queueId: 71,
+    eventListPath,
+    outputDir: path.join(pixEventsDirectory, "rejected"),
+    pixToolPath,
+  }, async () => {
+    resourceExportCalls++;
+    return { code: 0, stdout: "", stderr: "" };
+  }), /ha Queue ID 70 \(atteso 71\)/);
+  assert.equal(resourceExportCalls, 0, "queue mismatch blocks all pixtool calls");
+  assert.equal(fs.existsSync(path.join(pixEventsDirectory, "rejected")), false, "mismatch creates no output directory");
+
+  const acceptedOutputDir = path.join(pixEventsDirectory, "accepted");
+  const resourceResult = await exportPixDrawResource({
+    pixPath: capturePath,
+    globalId: 34,
+    queueId: 70,
+    queueLabel: "Graphics Queue 1",
+    eventListPath,
+    outputDir: acceptedOutputDir,
+    pixToolPath,
+  }, async (_command, args) => {
+    const exportIndex = args.indexOf("save-resource");
+    assert.notEqual(exportIndex, -1, "verified event reaches save-resource");
+    fs.writeFileSync(args[exportIndex + 1], "png");
+    return { code: 0, stdout: "", stderr: "" };
+  });
+  assert.equal(resourceResult.eventRowVerified, true);
+  assert.equal(resourceResult.queueLabelVerifiedByEventList, false);
+  assert.equal(fs.existsSync(resourceResult.outputPath), true);
+
+  const noQueueListPath = path.join(pixEventsDirectory, "no-queue.csv");
+  fs.writeFileSync(noQueueListPath, [
+    "Global ID,Name",
+    '34,"DrawIndexedInstanced(6, 1, 0, 0, 0)"',
+  ].join("\r\n"), "utf8");
+  await assert.rejects(() => exportPixDrawResource({
+    pixPath: capturePath,
+    globalId: 34,
+    queueId: 70,
+    eventListPath: noQueueListPath,
+    outputDir: path.join(pixEventsDirectory, "missing-queue"),
+    pixToolPath,
+  }, async () => {
+    resourceExportCalls++;
+    return { code: 0, stdout: "", stderr: "" };
+  }), /colonna Queue ID manca/);
+  assert.equal(resourceExportCalls, 0, "missing queue ID blocks resource export");
+
+  const noGlobalListPath = path.join(pixEventsDirectory, "no-global.csv");
+  fs.writeFileSync(noGlobalListPath, [
+    "Queue ID,Name",
+    '70,"DrawIndexedInstanced(6, 1, 0, 0, 0)"',
+  ].join("\r\n"), "utf8");
+  await assert.rejects(() => exportPixDrawResource({
+    pixPath: capturePath,
+    globalId: 34,
+    queueId: 70,
+    eventListPath: noGlobalListPath,
+    outputDir: path.join(pixEventsDirectory, "missing-global"),
+    pixToolPath,
+  }, async () => {
+    resourceExportCalls++;
+    return { code: 0, stdout: "", stderr: "" };
+  }), /trovate 0/);
+  assert.equal(resourceExportCalls, 0, "missing global ID blocks resource export");
+
+  await assert.rejects(() => exportPixDrawResource({
+    pixPath: capturePath,
+    globalId: 36,
+    queueId: 70,
+    eventListPath,
+    outputDir: path.join(pixEventsDirectory, "not-draw"),
+    pixToolPath,
+  }, async () => {
+    resourceExportCalls++;
+    return { code: 0, stdout: "", stderr: "" };
+  }), /non è un evento Draw/);
+  assert.equal(resourceExportCalls, 0, "non-draw event blocks resource export");
+} finally {
+  fs.rmSync(pixEventsDirectory, { recursive: true, force: true });
+}
+
 const pixPrompt = buildPixPrompt("C:\\captures\\GPU 1.wpix");
 assert.match(pixPrompt, /analyze_pix_capture/);
 assert.match(pixPrompt, /NON DECODIFICATO/);
@@ -204,4 +324,10 @@ const fullPixPrompt = buildPixPrompt("C:\\captures\\frame.wpix", {
 assert.match(fullPixPrompt, /"mode":"full"/);
 assert.ok(fullPixPrompt.includes('"pixToolPath":"C:\\\\Program Files\\\\Microsoft PIX\\\\pixtool.exe"'));
 assert.match(fullPixPrompt, /non caricare la cattura/);
+const eventListPrompt = buildPixEventListPrompt({ pixPath: "capture.wpix", queueId: 70 });
+assert.match(eventListPrompt, /list_pix_events/);
+assert.match(eventListPrompt, /non Global ID/);
+const resourcePrompt = buildPixResourcePrompt({ pixPath: "capture.wpix", globalId: 34, queueId: 70 });
+assert.match(resourcePrompt, /export_pix_draw_resource/);
+assert.match(resourcePrompt, /stessa riga/);
 console.log("\nTUTTI I TEST OK");

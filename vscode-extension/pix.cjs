@@ -31,4 +31,20 @@ function buildPixPrompt(file, options = {}) {
   );
 }
 
-module.exports = { choosePixCapture, buildPixPrompt };
+function buildPixEventListPrompt(options) {
+  return (
+    `Chiama il tool MCP \`list_pix_events\` con ${JSON.stringify(options)}. ` +
+    "Il valore queueId è il numero nella colonna Queue ID, non Global ID. " +
+    "Separa l'etichetta UI dichiarata dall'utente dai dati verificati nella event list; non attribuire all'intera cattura una queue."
+  );
+}
+
+function buildPixResourcePrompt(options) {
+  return (
+    `Chiama il tool MCP \`export_pix_draw_resource\` con ${JSON.stringify(options)}. ` +
+    "Non eseguire un export se il tool non verifica nella stessa riga che Global ID e Queue ID coincidano e che l'evento sia una draw. " +
+    "Distingui la queue label attestata dall'utente e non considerare una corrispondenza di draw signature prova di equivalenza tra GPU o catture."
+  );
+}
+
+module.exports = { choosePixCapture, buildPixPrompt, buildPixEventListPrompt, buildPixResourcePrompt };

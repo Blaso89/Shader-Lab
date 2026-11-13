@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const vscode = require("vscode");
-const { choosePixCapture, buildPixPrompt } = require("./pix.cjs");
+const { choosePixCapture, buildPixPrompt, buildPixEventListPrompt, buildPixResourcePrompt } = require("./pix.cjs");
 const {
   getConfiguredServer,
   isServerConfigured,
@@ -98,6 +98,12 @@ class ShaderLabViewProvider {
           return;
         case "scanPix":
           await this.scanPix();
+          return;
+        case "listPixEvents":
+          await this.listPixEvents();
+          return;
+        case "exportPixResource":
+          await this.exportPixResource();
           return;
         case "configurePixTools":
           await this.configurePixTools();
@@ -254,10 +260,16 @@ class ShaderLabViewProvider {
       if (!eventFiles?.[0]) return;
       args.eventListPath = eventFiles[0].fsPath;
       const queueName = await vscode.window.showInputBox({
-        prompt: "Etichetta facoltativa della queue selezionata in PIX; non è verificabile se l'export non la include.",
+        prompt: "Etichetta facoltativa della queue selezionata in PIX; è un'attestazione UI e non è verificata dal CSV.",
         placeHolder: "Graphics Queue 1 (3D Queue (GPU 0))",
       });
       if (queueName?.trim()) args.queueName = queueName.trim();
+      const queueId = await vscode.window.showInputBox({
+        prompt: "Queue ID numerico dalla colonna Queue ID della stessa event list (non Global ID); lascia vuoto per non filtrare.",
+        placeHolder: "70",
+        validateInput: (value) => value.trim() && !/^\d+$/.test(value.trim()) ? "Inserisci un intero non negativo." : undefined,
+      });
+      if (queueId?.trim()) args.queueId = Number(queueId.trim());
     }
 
     const confirmed = await vscode.window.showWarningMessage(
@@ -273,6 +285,113 @@ class ShaderLabViewProvider {
     const file = await choosePixCapture();
     if (!file) return;
     await this.openChat(buildPixPrompt(file, { mode: "scan" }));
+  }
+
+  async chooseEventList() {
+    const choice = await vscode.window.showQuickPick([
+      { label: "Seleziona un event list già esportato da PIX", value: "select" },
+      { label: "Prova l'export locale con pixtool", value: "auto" },
+    ], { title: "Origine event list PIX" });
+    if (!choice) return null;
+    if (choice.value === "auto") return { eventListPath: undefined };
+    const files = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      openLabel: "Usa event list",
+      title: "Seleziona event list esportato da PIX (CSV, TSV o TXT)",
+      filters: { "Event list": ["csv", "tsv", "txt"], "Tutti i file": ["*"] },
+    });
+    return files?.[0] ? { eventListPath: files[0].fsPath } : null;
+  }
+
+  async askPixInteger(prompt, placeHolder) {
+    const value = await vscode.window.showInputBox({
+      prompt,
+      placeHolder,
+      validateInput: (input) => /^\d+$/.test(input.trim()) ? undefined : "Inserisci un intero non negativo.",
+    });
+    if (value === undefined) return null;
+    const parsed = Number(value.trim());
+    if (!Number.isSafeInteger(parsed)) {
+      void vscode.window.showErrorMessage("Il valore supera l'intervallo di interi supportato.");
+      return null;
+    }
+    return parsed;
+  }
+
+  async listPixEvents() {
+    const file = await choosePixCapture();
+    if (!file) return;
+    const queueId = await this.askPixInteger("Inserisci il Queue ID numerico dalla event list PIX (non Global ID).", "70");
+    if (queueId === null) return;
+    const eventList = await this.chooseEventList();
+    if (!eventList) return;
+    const queueLabel = await vscode.window.showInputBox({
+      prompt: "Etichetta opzionale copiata dalla UI PIX; è solo un'attestazione dell'utente.",
+      placeHolder: "Graphics Queue 1",
+    });
+    if (queueLabel === undefined) return;
+    const contains = await vscode.window.showInputBox({
+      prompt: "Filtro facoltativo sul nome evento (es. DrawIndexedInstanced).",
+      placeHolder: "Draw",
+    });
+    if (contains === undefined) return;
+
+    await this.openChat(buildPixEventListPrompt({
+      pixPath: file,
+      queueId,
+      queueLabel: queueLabel.trim() || undefined,
+      eventListPath: eventList.eventListPath,
+      contains: contains.trim() || undefined,
+      ...this.getPixToolchain(),
+    }));
+  }
+
+  async exportPixResource() {
+    const file = await choosePixCapture();
+    if (!file) return;
+    const globalId = await this.askPixInteger("Inserisci il Global ID della draw event.", "34");
+    if (globalId === null) return;
+    const queueId = await this.askPixInteger("Inserisci il Queue ID numerico della stessa riga event list.", "70");
+    if (queueId === null) return;
+    const eventList = await this.chooseEventList();
+    if (!eventList) return;
+    const output = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "Usa cartella output",
+      title: "Scegli dove salvare il render target esportato",
+    });
+    if (!output?.[0]) return;
+    const rtvIndex = await this.askPixInteger("Indice RTV da esportare (da 0 a 7).", "0");
+    if (rtvIndex === null || rtvIndex > 7) {
+      if (rtvIndex !== null) void vscode.window.showErrorMessage("L'indice RTV deve essere compreso tra 0 e 7.");
+      return;
+    }
+    const queueLabel = await vscode.window.showInputBox({
+      prompt: "Etichetta opzionale copiata dalla UI PIX; non è verificata dal CSV.",
+      placeHolder: "Graphics Queue 1",
+    });
+    if (queueLabel === undefined) return;
+
+    const confirmed = await vscode.window.showWarningMessage(
+      "Il tool verificherà Global ID, Queue ID e tipo draw nella stessa riga prima di chiamare pixtool. L'export salva un PNG locale e non modifica la cattura.",
+      { modal: true },
+      "Verifica ed esporta",
+    );
+    if (confirmed !== "Verifica ed esporta") return;
+    await this.openChat(buildPixResourcePrompt({
+      pixPath: file,
+      globalId,
+      queueId,
+      queueLabel: queueLabel.trim() || undefined,
+      eventListPath: eventList.eventListPath,
+      outputDir: output[0].fsPath,
+      rtvIndex,
+      ...this.getPixToolchain(),
+    }));
   }
 
   getPixToolchain() {
@@ -396,7 +515,7 @@ class ShaderLabViewProvider {
   <header class="hero">
     <div class="eyebrow">ANALISI LOCALE · D3D12</div>
     <h1>Cattura PIX</h1>
-    <p>Analisi statica read-only oppure estrazione completa di PSO e shader.</p>
+    <p>Analisi statica, estrazione PSO/shader e accesso mirato agli eventi o ai render target.</p>
     <div class="status-row"><span id="server-status" class="status pending">Verifica MCP…</span></div>
   </header>
   <section class="notice">
@@ -422,10 +541,20 @@ class ShaderLabViewProvider {
       <div class="step-copy"><h3>Analisi completa</h3><p>Estrae il progetto PIX, decomprime i payload shader, correla i PSO, disassembla DXIL e salva report/manifest nella cartella scelta.</p></div>
       <button data-action="analyzePix">Seleziona .wpix e avvia</button>
     </article>
+    <article class="step-card">
+      <div class="step-number">02</div>
+      <div class="step-copy"><h3>Elenco eventi per queue</h3><p>Filtra le righe per Queue ID numerico; l'etichetta Graphics Queue 1 resta una verifica visiva dell'utente.</p></div>
+      <button class="secondary" data-action="listPixEvents">Elenca eventi</button>
+    </article>
+    <article class="step-card">
+      <div class="step-number">03</div>
+      <div class="step-copy"><h3>Esporta render target</h3><p>Controlla nella stessa riga Global ID, Queue ID e tipo draw prima di avviare save-resource.</p></div>
+      <button class="secondary" data-action="exportPixResource">Verifica ed esporta PNG</button>
+    </article>
   </section>
   <section class="section">
     <h2>Note operative</h2>
-    <p class="muted-copy">La modalità completa scrive solo nella cartella output e può avviare un replay/export tramite pixtool. La cattura originale resta intatta; il C++ esportato non viene eseguito. L'event list può essere selezionato separatamente per preservare l'export della queue desiderata.</p>
+    <p class="muted-copy">La modalità completa scrive solo nella cartella output e può avviare un replay/export tramite pixtool. La cattura originale resta intatta; il C++ esportato non viene eseguito. Pixtool esporta l'event list senza filtro queue: Shader Lab applica il filtro numerico Queue ID alle righe e non presume che l'ID corrisponda al nome mostrato in UI.</p>
   </section>
   <footer><button class="link-button" data-action="configureMcp">Configura server MCP VS Code</button></footer>
   <script nonce="${nonce}" src="${script}"></script>

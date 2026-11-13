@@ -43,6 +43,14 @@ azzerati per ripristinare l'autodiscovery. Non sono inclusi percorsi assoluti ma
 nel VSIX. Il server MCP resta un componente separato: su un nuovo PC selezionare la cartella
 del progetto compilato con **Configura server MCP VS Code**.
 
+Le azioni **Elenca eventi** e **Verifica ed esporta PNG** usano rispettivamente i tool MCP
+`list_pix_events` ed `export_pix_draw_resource`. Inserire il numero dalla colonna `Queue ID`
+(distinto dal `Global ID`); l'etichetta UI, ad esempio Graphics Queue 1, è registrata come
+attestazione dell'utente e non viene dedotta dal CSV. Per esportare una risorsa, il server
+verifica sulla stessa riga che il Global ID sia unico, il Queue ID corrisponda e l'evento sia
+una draw prima di chiamare pixtool. Se viene fornito un event list manuale, la sua
+corrispondenza con la cattura selezionata non è verificabile.
+
 Le azioni che coinvolgono Copilot preparano una richiesta con i percorsi selezionati.
 Il server MCP è quello autonomo `sm6-to-sm5`, non il Ghidra Analysis Manager. Se la
 richiesta non apre Copilot Chat automaticamente, avviare il server MCP e usare Agent
@@ -56,6 +64,7 @@ possano usarlo. Un passaggio FXC convalida la sintassi/profilo dello shader, non
 l'equivalenza visiva o l'integrazione con l'engine.
 
 La scansione statica `.wpix` è limitata a header e blocchi. L'analisi completa usa
-l'export C++ documentato da PIX, non decodifica direttamente il formato `.wpix`; gli
-eventuali event list non attestano la queue se il formato non ne include il nome. I
-verdetti shader sono statici e non dimostrano equivalenza visiva o compatibilità runtime.
+l'export C++ documentato da PIX, non decodifica direttamente il formato `.wpix`.
+L'event list generata da pixtool è non filtrata e viene filtrata localmente per Queue ID;
+un export manuale potrebbe provenire da un'altra cattura. I verdetti shader sono statici
+e non dimostrano equivalenza visiva o compatibilità runtime.
