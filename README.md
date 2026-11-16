@@ -62,7 +62,8 @@ tra versioni: se il tool fallisce, controlla `dxil-spirv --help`.
 - `analyze_dxil`: analisi statica di **DXIL compilato** (`.dxil` + disassemblato DXC): stadio, binding, register space, wave/64-bit/barycentrics/DXR/mesh, limiti D3D11, verdetto.
 - `convert_shader` / `convert_directory`: riscrittura SM6→SM5 + `binding_map.json`.
 - `compile_sm5`: compila con FXC per confermare che l'output è valido.
-- `dxil_to_sm5_hlsl`: DXIL → SPIR-V → HLSL 5.0 + post-processing (registri duplicati, register space, base instance, semantiche dei vertex input, entry point e `[numthreads]` compute ripresi dal disassemblato). Si ferma se l'analisi trova bloccanti. Output = *candidato*, da validare con fxc.
+- `validate_pair`: confronta le firme output/input di un `.cso` VS e un `.cso` PS tramite `fxc /dumpbin`, verificando semantiche, maschere e tipi e restituendo PASS/FAIL.
+- `dxil_to_sm5_hlsl`: DXIL → SPIR-V → HLSL 5.0 + post-processing (registri duplicati, register space, base instance, semantiche dei vertex input, entry point e `[numthreads]` compute ripresi dal disassemblato). Per un PS, `vsOutputDisasmPath` applica le semantiche della firma output del VS abbinato. Si ferma se l'analisi trova bloccanti. Output = *candidato*, da validare con fxc.
 - `analyze_pix_capture`: `mode=scan` ispeziona il `.wpix` in sola lettura e con limiti espliciti; `mode=full` usa pixtool, estrae PSO e payload shader, li disassembla con DXC e salva report/manifest nella cartella scelta. La modalità completa può avviare un replay/export PIX, non modifica la cattura originale e non esegue il C++ generato.
 - `list_pix_events`: esporta l'event list non filtrato con pixtool o legge un CSV/TSV locale; supporta paginazione, filtro sul nome e filtro esatto per il `Queue ID` di una singola riga. `Queue ID` non identifica la queue.
 - `export_pix_draw_resource`: verifica che il `Global ID` identifichi una sola draw event e che la stessa riga abbia il `Queue ID` richiesto prima di invocare `save-resource`. Non esporta se l'identificazione è ambigua, il Queue ID non coincide o la riga non è una draw.
@@ -163,7 +164,20 @@ assente/non valido; il file `.dxil` dumpato può essere passato agli strumenti `
 `dxil_to_sm5_hlsl` dello Shader Lab. Se il log non contiene `PSO ... BEGIN`, l'applicazione si è
 fermata prima di richiedere la creazione di una pipeline e non è ancora possibile stabilire quali
 shader restano da convertire. Il proxy non compila DXIL automaticamente: ogni shader DXIL necessita
-di un override SM5 valido. Le risposte `CheckFeatureSupport` riportano nomi, valori ed HRESULT nel log.
+di un override SM5 valido. Con `diagnostic_render_trace=1`, il proxy emette periodicamente
+`[SHADER_USE_SUMMARY]`, `[DRAW_SHADER_USE]` e `[COMPUTE_SHADER_USE]`: registra i draw graphics con
+gli hash VS/PS/GS/HS/DS e i dispatch compute con l'hash CS, raggruppati per esito, maschera degli
+stadi mancanti e, per i draw, presenza del PSO graphics e RTV del backbuffer. I conteggi sono comandi:
+uno `ExecuteIndirect` saltato è pesato con `maxCommandCount`, come il percorso eseguito che conta ogni
+comando. La tabella traccia al massimo 512 gruppi complessivi e ogni riepilogo stampa al massimo 64
+gruppi, dando precedenza a gruppi saltati o con stadi mancanti e riportando separatamente draw/dispatch
+in overflow o omessi. Ogni riepilogo copre la finestra dall'heartbeat precedente; i contatori Present
+restano process-wide: `present_calls_process_wide` e gli intervalli
+`first/last_observed_present_count_process_wide` non sono identificatori di frame. La telemetria registra
+i comandi osservati dal proxy ma non dimostra che uno shader abbia contribuito visivamente all'immagine.
+Le chiamate `ExecuteIndirect` rifiutate per range non valido o backing resource indisponibile producono
+log di errore ma nessun record shader, perché il proxy non emette quei comandi.
+Le risposte `CheckFeatureSupport` riportano nomi, valori ed HRESULT nel log.
 Il proxy traduce in modo limitato texture 2D reserved con layout 64 KB undefined-swizzle e buffer reserved
 row-major, tile pool e mapping/copy delle tile via D3D11.2. Per i buffer tiled il backing D3D11 puo' essere
 piu' piccolo della larghezza virtuale D3D12: il comportamento di tiling/mapping resta da validare sui driver.

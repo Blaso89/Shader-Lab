@@ -8,7 +8,10 @@ import * as path from "node:path";
 import { analyze, formatFindings } from "./analyzer.js";
 import { convert } from "./converter.js";
 import { run, findFxc, dxilSpirvPath, spirvCrossPath } from "./external.js";
-import { analyzeFiles, formatReport, parseInputSignature, SigElement } from "./dxil-analyzer.js";
+import {
+  analyzeDisasm, analyzeFiles, compareShaderSignatures, formatReport,
+  parseInputSignature, parseOutputSignature, SigElement,
+} from "./dxil-analyzer.js";
 import { postprocessHlsl } from "./hlsl-post.js";
 import { registerPixTool } from "./pix-tool.js";
 
@@ -139,24 +142,65 @@ server.registerTool("compile_sm5", {
     : fail(`✖ Compilazione fallita:\n${r.stderr || r.stdout}`);
 });
 
+// ---------------------------------------------------------------- validate_pair
+server.registerTool("validate_pair", {
+  title: "Valida una coppia VS/PS",
+  description: "Confronta le firme output del vertex shader e input del pixel shader da due file .cso tramite fxc /dumpbin. Verifica semantiche, maschere e tipi.",
+  inputSchema: {
+    vsCso: z.string().min(1).describe("Percorso del bytecode .cso del vertex shader"),
+    psCso: z.string().min(1).describe("Percorso del bytecode .cso del pixel shader"),
+  },
+}, async ({ vsCso, psCso }) => {
+  const [vsDump, psDump] = await Promise.all([
+    run(findFxc(), ["/dumpbin", vsCso]),
+    run(findFxc(), ["/dumpbin", psCso]),
+  ]);
+  if (vsDump.missing || psDump.missing)
+    return fail(`${vsDump.missing ? vsDump.stderr : psDump.stderr}\nImposta FXC_PATH o installa il Windows SDK.`);
+  if (vsDump.code !== 0 || psDump.code !== 0)
+    return fail(`fxc /dumpbin fallito:\n${vsDump.code !== 0 ? `${vsCso}:\n${vsDump.stderr || vsDump.stdout}\n` : ""}${psDump.code !== 0 ? `${psCso}:\n${psDump.stderr || psDump.stdout}` : ""}`);
+
+  const vsOutput = parseOutputSignature(`${vsDump.stdout}\n${vsDump.stderr}`);
+  const psInput = parseInputSignature(`${psDump.stdout}\n${psDump.stderr}`);
+  if (!vsOutput.length || !psInput.length)
+    return fail(`Firma ${!vsOutput.length ? "output VS" : "input PS"} non trovata nell'output FXC. Verificare che i file contengano shader compilati validi.`);
+  const incomplete = [
+    ...vsOutput.filter((element) => element.sysValue.toUpperCase() === "NONE" && (!element.mask || !element.format)).map((element) => `VS ${element.name}${element.index}`),
+    ...psInput.filter((element) => element.sysValue.toUpperCase() === "NONE" && (!element.mask || !element.format)).map((element) => `PS ${element.name}${element.index}`),
+  ];
+  if (incomplete.length)
+    return fail(`FXC non ha fornito maschera o tipo per: ${incomplete.join(", ")}.`);
+
+  const comparison = compareShaderSignatures(vsOutput, psInput);
+  const verdict = comparison.compatible ? "PASS" : "FAIL";
+  const details = comparison.mismatches.length
+    ? comparison.mismatches.map((mismatch) => `  - ${mismatch}`).join("\n")
+    : "  Tutte le semantiche PS richieste sono presenti e compatibili negli output VS.";
+  return ok(`${verdict} — VS ${path.basename(vsCso)} -> PS ${path.basename(psCso)}\nInterfacce verificate: ${comparison.checked}\n${details}`);
+});
+
 // ---------------------------------------------------------------- dxil_to_sm5_hlsl
 server.registerTool("dxil_to_sm5_hlsl", {
   title: "DXIL (binario) -> HLSL SM5 (candidato)",
-  description: "Per shader senza sorgente: DXIL -> SPIR-V (dxil-spirv) -> HLSL 5.0 (spirv-cross) + post-processing (registri duplicati, register space, base instance, semantiche dei vertex input). Il risultato è codice decompilato: va validato con fxc e rivisto. Esegue prima l'analisi e si ferma se trova feature SM6 senza equivalente (a meno di force=true).",
+  description: "Per shader senza sorgente: DXIL -> SPIR-V (dxil-spirv) -> HLSL 5.0 (spirv-cross) + post-processing (registri duplicati, register space, base instance, semantiche dei vertex input e, se fornita, firma output del VS abbinato per un PS). Il risultato è codice decompilato: va validato con fxc e rivisto. Esegue prima l'analisi e si ferma se trova feature SM6 senza equivalente (a meno di force=true).",
   inputSchema: {
     inputPath: z.string().describe("File .dxil / .cso con payload DXIL"),
     outPath: z.string(),
     disasmPath: z.string().optional().describe("Disassemblato DXC: abilita analisi preliminare e semantiche dei vertex input"),
+    vsOutputDisasmPath: z.string().optional().describe("Disassemblato DXC del VS abbinato: per rinominare le semantiche input generate durante la conversione di un PS"),
     bindingMapPath: z.string().optional().describe("JSON {\"t:1:0\": 5, ...} prodotto dal wrapper per i register space"),
     bufferMode: z.enum(["raw", "typed"]).default("raw").describe("raw = ByteAddressBuffer (--ssbo-srv/--ssbo-uav); typed = Buffer<uint4> in stile Vulkan"),
     force: z.boolean().default(false),
     validateProfile: z.string().optional(), entry: z.string().optional().describe("Entry point HLSL, se diverso da quello generato automaticamente dal traduttore"),
   },
-}, async ({ inputPath, outPath, disasmPath, bindingMapPath, bufferMode, force, validateProfile, entry }) => {
+}, async ({ inputPath, outPath, disasmPath, vsOutputDisasmPath, bindingMapPath, bufferMode, force, validateProfile, entry }) => {
+  if (vsOutputDisasmPath && !disasmPath)
+    return fail("vsOutputDisasmPath richiede disasmPath per verificare che lo shader convertito sia un pixel shader.");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dxil2sm5-"));
   const spv = path.join(tmp, "shader.spv");
   const notes: string[] = [];
   let sig: SigElement[] = [];
+  let vsOutputSig: SigElement[] | undefined;
   let metadata: { stage?: string; numThreads?: string } = {};
   if (disasmPath) {
     const rep = analyzeFiles(inputPath, disasmPath);
@@ -167,18 +211,30 @@ server.registerTool("dxil_to_sm5_hlsl", {
       return fail(`Conversione NON tentata: feature SM6 senza equivalente SM5.\n${formatReport(rep, path.basename(inputPath))}\n(force=true per provare comunque; il risultato non sarà valido in D3D11.)`);
     if (blockers.length) notes.push("ATTENZIONE: force=true con bloccanti presenti: l'output non è utilizzabile così com'è.");
   }
+  if (vsOutputDisasmPath) {
+    if (metadata.stage !== "ps") return fail("vsOutputDisasmPath è valido solo convertendo un pixel shader (stadio PS).");
+    let vsText: string;
+    try { vsText = fs.readFileSync(vsOutputDisasmPath, "utf8"); }
+    catch (error) { return fail(`Impossibile leggere vsOutputDisasmPath (${vsOutputDisasmPath}): ${String(error)}`); }
+    if (analyzeDisasm(vsText).stage !== "vs")
+      return fail("vsOutputDisasmPath non contiene un disassemblato di vertex shader.");
+    vsOutputSig = parseOutputSignature(vsText);
+    if (!vsOutputSig.length) return fail("Nessuna Output signature trovata nel disassemblato VS.");
+  }
   const dxArgs = [inputPath, "--output", spv, ...(bufferMode === "raw" ? ["--ssbo-srv", "--ssbo-uav"] : [])];
   const r1 = await run(dxilSpirvPath(), dxArgs);
   if (r1.missing) return fail(`${r1.stderr}\nInstalla dxil-spirv (github.com/HansKristian-Work/dxil-spirv) e imposta DXIL_SPIRV_PATH.`);
   if (r1.code !== 0) return fail(`dxil-spirv fallito:\n${r1.stderr || r1.stdout}`);
   const rawHlsl = path.join(tmp, "raw.hlsl");
   const scArgs = [spv, "--hlsl", "--shader-model", "50", "--output", rawHlsl];
-  for (const e of sig) if (e.sysValue === "NONE" && e.register !== null) scArgs.push("--set-hlsl-vertex-input-semantic", String(e.register), `${e.name}${e.index}`);
+  if (metadata.stage === "vs")
+    for (const e of sig) if (e.sysValue.toUpperCase() === "NONE" && e.register !== null)
+      scArgs.push("--set-hlsl-vertex-input-semantic", String(e.register), `${e.name}${e.index}`);
   const r2 = await run(spirvCrossPath(), scArgs);
   if (r2.missing) return fail(`${r2.stderr}\nInstalla SPIRV-Cross e imposta SPIRV_CROSS_PATH.`);
   if (r2.code !== 0 || !fs.existsSync(rawHlsl)) return fail(`spirv-cross fallito (tipico per feature non rappresentabili in HLSL SM5, es. immagini 64-bit):\n${r2.stderr || r2.stdout}`);
   const bmap = bindingMapPath ? (JSON.parse(fs.readFileSync(bindingMapPath, "utf8")) as Record<string, number>) : undefined;
-  const post = postprocessHlsl(fs.readFileSync(rawHlsl, "utf8"), fs.readFileSync(spv), bmap, metadata);
+  const post = postprocessHlsl(fs.readFileSync(rawHlsl, "utf8"), fs.readFileSync(spv), bmap, metadata, vsOutputSig);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, post.hlsl, "utf8");
   let msg = `HLSL SM5 (candidato) scritto: ${outPath}\nPost-processing:\n${post.changes.map((c) => "  - " + c).join("\n") || "  (nessuna modifica)"}`;

@@ -1,3 +1,5 @@
+import type { SigElement } from "./dxil-analyzer.js";
+
 /**
  * Post-processing dell'HLSL prodotto da spirv-cross partendo da DXIL/SPIR-V.
  * Corregge i problemi osservati sui campioni reali (DXC 1.8 / dxil-spirv / spirv-cross):
@@ -48,6 +50,7 @@ export function postprocessHlsl(
   spv?: Buffer,
   bindingMap?: Record<string, number>,
   metadata: ShaderMetadata = {},
+  vsOutputSig?: SigElement[],
 ): PostResult {
   const changes: string[] = [], warnings: string[] = [], registerMap: RegisterMapEntry[] = [];
   const lines = hlsl.split("\n");
@@ -77,6 +80,41 @@ export function postprocessHlsl(
     } else warnings.push(`Registro ${d.cls}${d.slot} usato da due risorse di tipo diverso (${k.type} / ${d.type}): da risolvere a mano.`);
   }
   let out = lines.filter((_, i) => !removed.has(i)).join("\n");
+  if (vsOutputSig && metadata.stage === "ps") {
+    const semanticByRegister = new Map<number, string>();
+    const ambiguousRegisters = new Set<number>();
+    for (const element of vsOutputSig) {
+      if (element.sysValue.toUpperCase() !== "NONE" || element.register === null) continue;
+      const semantic = `${element.name}${element.index}`;
+      const existing = semanticByRegister.get(element.register);
+      if (existing && existing.toUpperCase() !== semantic.toUpperCase()) ambiguousRegisters.add(element.register);
+      else semanticByRegister.set(element.register, semantic);
+    }
+    for (const register of ambiguousRegisters) semanticByRegister.delete(register);
+
+    const unmatched = new Set<number>();
+    let semanticRenames = 0;
+    out = out.replace(/(\s*:\s*)TEXCOORD(\d+)\b/gi, (match, prefix: string, registerText: string) => {
+      const register = Number(registerText);
+      if (ambiguousRegisters.has(register)) {
+        unmatched.add(register);
+        return match;
+      }
+      const semantic = semanticByRegister.get(register);
+      if (!semantic) {
+        unmatched.add(register);
+        return match;
+      }
+      if (semantic.toUpperCase() === `TEXCOORD${register}`.toUpperCase()) return match;
+      semanticRenames++;
+      return `${prefix}${semantic}`;
+    });
+    if (semanticRenames) changes.push(`Rinominate ${semanticRenames} semantiche di input PS secondo la firma output VS`);
+    if (unmatched.size)
+      warnings.push(`Semantiche TEXCOORD senza output VS univoco ai registri ${[...unmatched].sort((a, b) => a - b).join(", ")}: lasciate invariate.`);
+  } else if (vsOutputSig) {
+    warnings.push("vsOutputSig ignorata: il post-processing semantico è applicabile solo a un pixel shader.");
+  }
   for (const [from, to] of renames) out = out.replace(new RegExp(`\\b${esc(from)}\\b`, "g"), to);
   if (renames.length) changes.push(`Unificate ${renames.length} dichiarazioni duplicate sullo stesso registro`);
 

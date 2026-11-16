@@ -42,7 +42,7 @@ for (const c of ["W001", "R001", "I001", "X003", "A002"]) assert(codes.has(c), c
 assert.equal(bad.filter((f) => f.code === "W001").length, 1, "WaveSize/commenti non devono contare come wave");
 
 // ---- analizzatore DXIL (regressione sul parsing dei binding del disassemblato DXC)
-import { analyzeDisasm } from "./dxil-analyzer.js";
+import { analyzeDisasm, compareShaderSignatures, parseInputSignature, parseOutputSignature } from "./dxil-analyzer.js";
 import { postprocessHlsl } from "./hlsl-post.js";
 import { analyzeSource, DEFAULT_LIMITS, findPixTool, resolveLimits, type ByteSource } from "./pix-capture.js";
 import { exportPixDrawResource, listPixEvents, parsePixEventListText } from "./pix-events.js";
@@ -146,6 +146,56 @@ assert.equal(rep.verdict, "not-convertible");
 assert.equal(rep.numThreads, "(64,1,1)", "numthreads letto dal disassemblato");
 assert.equal(rep.entry, "MainCS", "entry originale letto dal disassemblato");
 
+// ---- firme FXC/DXC e validazione delle coppie VS/PS
+const fxcSignatures = [
+  "// Input signature:",
+  "// Name                 Index   Mask Register SysValue  Format   Used",
+  "// -------------------- ----- ------ -------- -------- ------- ------",
+  "// TEXCOORD                 1   xyzw        1     NONE   float   xyzw",
+  "// SV_Position              0   xyzw        0      POS   float   xyzw",
+  "// Output signature:",
+  "// Name                 Index   Mask Register SysValue  Format   Used",
+  "// -------------------- ----- ------ -------- -------- ------- ------",
+  "// SV_Position              0   xyzw        0      POS   float   xyzw",
+].join("\n");
+assert.deepEqual(parseInputSignature(fxcSignatures), [
+  { name: "TEXCOORD", index: 1, register: 1, sysValue: "NONE", mask: "xyzw", format: "float" },
+  { name: "SV_Position", index: 0, register: 0, sysValue: "POS", mask: "xyzw", format: "float" },
+], "la firma input FXC viene letta con maschera e tipo");
+assert.deepEqual(parseOutputSignature(fxcSignatures), [
+  { name: "SV_Position", index: 0, register: 0, sysValue: "POS", mask: "xyzw", format: "float" },
+], "la firma output FXC viene letta separatamente");
+const dxcSignatures = [
+  "; Input signature:",
+  "; Name                 Index   Mask Register SysValue  Format   Used",
+  "; -------------------- ----- ------ -------- -------- ------- ------",
+  ";    TEXCOORD                 1   xy          0     NONE   float     xy",
+  "; Output signature:",
+  "; SV_Position              0   xyzw        0      POS   float   xyzw",
+].join("\n");
+assert.equal(parseInputSignature(dxcSignatures)[0].mask, "xy", "il formato DXC precedente resta supportato");
+assert.equal(parseOutputSignature(dxcSignatures)[0].sysValue, "POS", "output DXC letto correttamente");
+const compatiblePair = compareShaderSignatures(
+  [{ name: "TEXCOORD", index: 1, register: 1, sysValue: "NONE", mask: "xyzw", format: "float" }],
+  [{ name: "TEXCOORD", index: 1, register: 0, sysValue: "NONE", mask: "xy", format: "float" }],
+);
+assert.equal(compatiblePair.compatible, true, "maschera output più ampia è compatibile");
+const incompatiblePair = compareShaderSignatures(
+  [{ name: "TEXCOORD", index: 1, register: 1, sysValue: "NONE", mask: "xy", format: "float" }],
+  [
+    { name: "TEXCOORD", index: 1, register: 0, sysValue: "NONE", mask: "xyzw", format: "float" },
+    { name: "TEXCOORD", index: 2, register: 1, sysValue: "NONE", mask: "xyzw", format: "float" },
+  ],
+);
+assert.equal(incompatiblePair.compatible, false, "maschere input eccedenti e semantiche mancanti falliscono");
+assert(incompatiblePair.mismatches.some((mismatch) => mismatch.includes("TEXCOORD1") && mismatch.includes("PS richiede")));
+assert(incompatiblePair.mismatches.some((mismatch) => mismatch.includes("TEXCOORD2") && mismatch.includes("Manca")));
+const typeMismatch = compareShaderSignatures(
+  [{ name: "COLOR", index: 0, register: 0, sysValue: "NONE", mask: "xyzw", format: "uint" }],
+  [{ name: "COLOR", index: 0, register: 0, sysValue: "NONE", mask: "xyzw", format: "float" }],
+);
+assert.equal(typeMismatch.compatible, false, "tipi di componente differenti falliscono");
+
 // ---- ripristino metadati compute persi nel passaggio DXIL -> SPIR-V -> HLSL
 const computePost = postprocessHlsl(
   "uint _1 = 2u;\nuint _2 = (-_1) & 31u;\nvoid comp_main()\n{\n    return;\n}\n",
@@ -182,6 +232,20 @@ const vertexWrapperPost = postprocessHlsl(
   { stage: "vs" },
 );
 assert.equal(vertexWrapperPost.entryPoint, "main", "lo shader deve essere compilato tramite il wrapper che trasferisce gli input");
+const pixelSemanticPost = postprocessHlsl(
+  "struct SPIRV_Cross_Input { float4 color : TEXCOORD0; float2 uv : TEXCOORD1; float4 missing : TEXCOORD2; };",
+  undefined,
+  undefined,
+  { stage: "ps" },
+  [
+    { name: "COLOR", index: 0, register: 0, sysValue: "NONE" },
+    { name: "TEXCOORD", index: 3, register: 1, sysValue: "NONE" },
+  ],
+);
+assert(pixelSemanticPost.hlsl.includes("color : COLOR0"), "semantic PS rinominata secondo l'output VS");
+assert(pixelSemanticPost.hlsl.includes("uv : TEXCOORD3"), "indice semantic VS ripristinato");
+assert(pixelSemanticPost.hlsl.includes("missing : TEXCOORD2"), "semantica senza output VS lasciata invariata");
+assert(pixelSemanticPost.warnings.some((warning) => warning.includes("registri 2")), "semantic PS senza output VS segnalata");
 const computeWrapperPost = postprocessHlsl(
   "void comp_main() {}\nvoid main() { comp_main(); }\n",
   undefined,

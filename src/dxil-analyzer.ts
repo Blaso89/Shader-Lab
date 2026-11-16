@@ -180,16 +180,78 @@ export function formatReport(r: DxilReport, title = ""): string {
   return o.join("\n");
 }
 
-export interface SigElement { name: string; index: number; register: number | null; sysValue: string }
-/** Prima "Input signature" del disassemblato: nome, indice, registro e SysValue. */
-export function parseInputSignature(text: string): SigElement[] {
+export interface SigElement {
+  name: string; index: number; register: number | null; sysValue: string;
+  mask?: string; format?: string;
+}
+
+function parseSignature(text: string, kind: "Input" | "Output"): SigElement[] {
   const lines = text.split(/\r?\n/);
-  const a = lines.findIndex((l) => l.startsWith("; Input signature:"));
+  const header = new RegExp(`^\\s*(?:;|//)\\s*${kind} signature:\\s*$`, "i");
+  const a = lines.findIndex((l) => header.test(l));
   if (a < 0) return [];
   const out: SigElement[] = [];
-  for (let i = a + 3; i < lines.length && !lines[i].startsWith("; Output signature:"); i++) {
-    const m = lines[i].match(/^;\s+(\w+)\s+(\d+)\s+(?:[xyzw]+|N\/A)\s+(\d+|special)\s+(\w+)\s+/);
-    if (m) out.push({ name: m[1], index: +m[2], register: /^\d+$/.test(m[3]) ? +m[3] : null, sysValue: m[4] });
+  for (let i = a + 1; i < lines.length; i++) {
+    if (/^\s*(?:;|\/\/)\s*(?:Input|Output) signature:/i.test(lines[i])) break;
+    const row = lines[i].replace(/^\s*(?:;|\/\/)\s*/, "");
+    const m = row.match(/^([A-Za-z_]\w*)\s+(\d+)\s+([xyzw]+|N\/A)\s+(\d+|special)\s+(\w+)(?:\s+(\w+))?(?:\s+([xyzw]+|N\/A))?\s*$/i);
+    if (m) out.push({
+      name: m[1],
+      index: +m[2],
+      register: /^\d+$/.test(m[4]) ? +m[4] : null,
+      sysValue: m[5],
+      ...(m[3].toUpperCase() !== "N/A" ? { mask: m[3] } : {}),
+      ...(m[6] ? { format: m[6] } : {}),
+    });
   }
   return out;
+}
+
+/** Legge la Input signature da dump DXC o FXC. */
+export function parseInputSignature(text: string): SigElement[] {
+  return parseSignature(text, "Input");
+}
+
+/** Legge la Output signature da dump DXC o FXC. */
+export function parseOutputSignature(text: string): SigElement[] {
+  return parseSignature(text, "Output");
+}
+
+export interface SignatureComparison { compatible: boolean; checked: number; mismatches: string[] }
+
+/** Confronta gli input PS con gli output VS per semantica, maschera e tipo. */
+export function compareShaderSignatures(vsOutput: SigElement[], psInput: SigElement[]): SignatureComparison {
+  const mismatches: string[] = [];
+  let checked = 0;
+  for (const input of psInput) {
+    const sysValue = input.sysValue.toUpperCase();
+    if (sysValue !== "NONE") {
+      if (sysValue === "POS" || sysValue === "POSITION") {
+        checked++;
+        if (!vsOutput.some((output) => ["POS", "POSITION"].includes(output.sysValue.toUpperCase())))
+          mismatches.push("PS richiede SV_Position, ma la firma VS non emette una posizione.");
+      }
+      continue;
+    }
+
+    checked++;
+    const key = `${input.name.toUpperCase()}${input.index}`;
+    const output = vsOutput.find((candidate) =>
+      candidate.sysValue.toUpperCase() === "NONE" &&
+      `${candidate.name.toUpperCase()}${candidate.index}` === key,
+    );
+    if (!output) {
+      mismatches.push(`Manca nell'output VS la semantica ${input.name}${input.index} richiesta dal PS.`);
+      continue;
+    }
+    if (input.format && output.format && input.format.toLowerCase() !== output.format.toLowerCase()) {
+      mismatches.push(`${input.name}${input.index}: tipo VS ${output.format}, tipo PS ${input.format}.`);
+    }
+    if (input.mask && output.mask) {
+      const missing = [...input.mask.toLowerCase()].filter((component) => !output.mask!.toLowerCase().includes(component));
+      if (missing.length)
+        mismatches.push(`${input.name}${input.index}: PS richiede ${input.mask}, ma VS fornisce ${output.mask}.`);
+    }
+  }
+  return { compatible: mismatches.length === 0, checked, mismatches };
 }

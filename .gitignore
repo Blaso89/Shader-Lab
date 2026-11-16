@@ -2,7 +2,19 @@ node_modules/
 dist/
 .vscode/
 .bridgecode/
-d3d12on11/
+d3d12on11/*
+!d3d12on11/CMakeLists.txt
+!d3d12on11/generated/
+d3d12on11/generated/*
+!d3d12on11/generated/*.inc
+!d3d12on11/src/
+d3d12on11/src/*
+!d3d12on11/src/*.cpp
+!d3d12on11/src/*.h
+!d3d12on11/src/*.def
+!d3d12on11/tests/
+d3d12on11/tests/*
+!d3d12on11/tests/*.cpp
 samples/
 
 *.wpix
