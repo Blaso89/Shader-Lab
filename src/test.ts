@@ -46,6 +46,7 @@ import { analyzeDisasm, compareShaderSignatures, parseInputSignature, parseOutpu
 import { postprocessHlsl } from "./hlsl-post.js";
 import { analyzeSource, DEFAULT_LIMITS, findPixTool, resolveLimits, type ByteSource } from "./pix-capture.js";
 import { exportPixDrawResource, listPixEvents, parsePixEventListText } from "./pix-events.js";
+import { runPrecompileTests } from "./precompile-test.js";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -207,6 +208,13 @@ assert.equal(computePost.entryPoint, "comp_main", "entry point compute SPIRV-Cro
 assert(computePost.hlsl.includes("[numthreads(64,1,1)]\nvoid comp_main()"), "attributo numthreads ripristinato");
 assert(computePost.changes.some((change) => change.toLowerCase().includes("numthreads")), "ripristino riportato tra le modifiche");
 assert(computePost.hlsl.includes("(0u - _1) & 31u"), "negazione uint resa esplicita senza cambiare l'aritmetica unsigned");
+const pixelEntryPost = postprocessHlsl(
+  "float4 frag_main() : SV_Target { return 0; }",
+  undefined,
+  undefined,
+  { stage: "ps" },
+);
+assert.equal(pixelEntryPost.entryPoint, "frag_main", "riconosce l'entry point pixel con return type non void");
 const invalidComputePost = postprocessHlsl(
   "void comp_main() {}",
   undefined,
@@ -470,4 +478,5 @@ assert.match(eventListPrompt, /non identifica la queue/);
 const resourcePrompt = buildPixResourcePrompt({ pixPath: "capture.wpix", globalId: 34, queueId: 70 });
 assert.match(resourcePrompt, /export_pix_draw_resource/);
 assert.match(resourcePrompt, /stessa riga/);
+await runPrecompileTests();
 console.log("\nTUTTI I TEST OK");

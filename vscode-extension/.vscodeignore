@@ -1,3 +1,5 @@
 .vscode/**
 *.vsix
 tests/**
+Mockup_dashboard ShaderLab.html
+vscode_plugin_precompile_running.html

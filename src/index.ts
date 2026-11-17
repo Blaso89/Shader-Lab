@@ -10,9 +10,9 @@ import { convert } from "./converter.js";
 import { run, findFxc, dxilSpirvPath, spirvCrossPath } from "./external.js";
 import {
   analyzeDisasm, analyzeFiles, compareShaderSignatures, formatReport,
-  parseInputSignature, parseOutputSignature, SigElement,
+  parseInputSignature, parseOutputSignature,
 } from "./dxil-analyzer.js";
-import { postprocessHlsl } from "./hlsl-post.js";
+import { convertDxilToHlsl } from "./dxil-precompile.js";
 import { registerPixTool } from "./pix-tool.js";
 
 const server = new McpServer({ name: "sm6-to-sm5", version: "0.1.0" });
@@ -194,72 +194,42 @@ server.registerTool("dxil_to_sm5_hlsl", {
     validateProfile: z.string().optional(), entry: z.string().optional().describe("Entry point HLSL, se diverso da quello generato automaticamente dal traduttore"),
   },
 }, async ({ inputPath, outPath, disasmPath, vsOutputDisasmPath, bindingMapPath, bufferMode, force, validateProfile, entry }) => {
-  if (vsOutputDisasmPath && !disasmPath)
-    return fail("vsOutputDisasmPath richiede disasmPath per verificare che lo shader convertito sia un pixel shader.");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "dxil2sm5-"));
-  const spv = path.join(tmp, "shader.spv");
-  const notes: string[] = [];
-  let sig: SigElement[] = [];
-  let vsOutputSig: SigElement[] | undefined;
-  let metadata: { stage?: string; numThreads?: string } = {};
-  if (disasmPath) {
-    const rep = analyzeFiles(inputPath, disasmPath);
-    metadata = { stage: rep.stage, numThreads: rep.numThreads };
-    sig = parseInputSignature(fs.readFileSync(disasmPath, "utf8"));
-    const blockers = rep.findings.filter((f) => f.sev === "blocker");
-    if (blockers.length && !force)
-      return fail(`Conversione NON tentata: feature SM6 senza equivalente SM5.\n${formatReport(rep, path.basename(inputPath))}\n(force=true per provare comunque; il risultato non sarà valido in D3D11.)`);
-    if (blockers.length) notes.push("ATTENZIONE: force=true con bloccanti presenti: l'output non è utilizzabile così com'è.");
+  try {
+    const converted = await convertDxilToHlsl({
+      inputPath, disasmPath, vsOutputDisasmPath, bindingMapPath, bufferMode, force,
+    });
+    const { post } = converted;
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, converted.hlsl, "utf8");
+    let msg = `HLSL SM5 (candidato) scritto: ${outPath}\nPost-processing:\n${post.changes.map((change) => "  - " + change).join("\n") || "  (nessuna modifica)"}`;
+    if (post.registerMap.length) msg += "\nMappa binding:\n" + post.registerMap.map((item) => `  ${item.from} -> ${item.to}`).join("\n");
+    if (post.entryPoint) msg += `\nEntry point HLSL: ${post.entryPoint}`;
+    if (post.warnings.length) msg += "\nAvvisi:\n" + post.warnings.map((warning) => "  - " + warning).join("\n");
+    if (converted.notes.length) msg += "\n" + converted.notes.join("\n");
+    let validationFailed = false;
+    if (validateProfile) {
+      if (!PROFILE.test(validateProfile)) return fail("validateProfile non valido.");
+      const validationEntry = entry ?? post.entryPoint ?? "main";
+      const result = await run(findFxc(), ["/nologo", "/T", validateProfile, "/E", validationEntry, "/Fo", path.join(tmp, "o.cso"), outPath]);
+      if (result.missing) {
+        validationFailed = true;
+        msg += `\n✖ fxc non disponibile: ${result.stderr}`;
+      } else if (result.code === 0) {
+        msg += `\n✔ Validazione FXC riuscita (${validateProfile}, entry ${validationEntry}). Equivalenza e runtime non verificati.`;
+        const diagnostics = (result.stderr || result.stdout).trim();
+        if (diagnostics) msg += `\nDiagnostica FXC:\n${diagnostics}`;
+      } else {
+        validationFailed = true;
+        msg += `\n✖ Validazione FXC fallita:\n${result.stderr || result.stdout}`;
+      }
+    } else msg += "\nNON validato come SM5 finché non passa fxc (usa validateProfile o compile_sm5).";
+    return validationFailed ? fail(msg) : ok(msg);
+  } catch (error) {
+    return fail(String(error));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
-  if (vsOutputDisasmPath) {
-    if (metadata.stage !== "ps") return fail("vsOutputDisasmPath è valido solo convertendo un pixel shader (stadio PS).");
-    let vsText: string;
-    try { vsText = fs.readFileSync(vsOutputDisasmPath, "utf8"); }
-    catch (error) { return fail(`Impossibile leggere vsOutputDisasmPath (${vsOutputDisasmPath}): ${String(error)}`); }
-    if (analyzeDisasm(vsText).stage !== "vs")
-      return fail("vsOutputDisasmPath non contiene un disassemblato di vertex shader.");
-    vsOutputSig = parseOutputSignature(vsText);
-    if (!vsOutputSig.length) return fail("Nessuna Output signature trovata nel disassemblato VS.");
-  }
-  const dxArgs = [inputPath, "--output", spv, ...(bufferMode === "raw" ? ["--ssbo-srv", "--ssbo-uav"] : [])];
-  const r1 = await run(dxilSpirvPath(), dxArgs);
-  if (r1.missing) return fail(`${r1.stderr}\nInstalla dxil-spirv (github.com/HansKristian-Work/dxil-spirv) e imposta DXIL_SPIRV_PATH.`);
-  if (r1.code !== 0) return fail(`dxil-spirv fallito:\n${r1.stderr || r1.stdout}`);
-  const rawHlsl = path.join(tmp, "raw.hlsl");
-  const scArgs = [spv, "--hlsl", "--shader-model", "50", "--output", rawHlsl];
-  if (metadata.stage === "vs")
-    for (const e of sig) if (e.sysValue.toUpperCase() === "NONE" && e.register !== null)
-      scArgs.push("--set-hlsl-vertex-input-semantic", String(e.register), `${e.name}${e.index}`);
-  const r2 = await run(spirvCrossPath(), scArgs);
-  if (r2.missing) return fail(`${r2.stderr}\nInstalla SPIRV-Cross e imposta SPIRV_CROSS_PATH.`);
-  if (r2.code !== 0 || !fs.existsSync(rawHlsl)) return fail(`spirv-cross fallito (tipico per feature non rappresentabili in HLSL SM5, es. immagini 64-bit):\n${r2.stderr || r2.stdout}`);
-  const bmap = bindingMapPath ? (JSON.parse(fs.readFileSync(bindingMapPath, "utf8")) as Record<string, number>) : undefined;
-  const post = postprocessHlsl(fs.readFileSync(rawHlsl, "utf8"), fs.readFileSync(spv), bmap, metadata, vsOutputSig);
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, post.hlsl, "utf8");
-  let msg = `HLSL SM5 (candidato) scritto: ${outPath}\nPost-processing:\n${post.changes.map((c) => "  - " + c).join("\n") || "  (nessuna modifica)"}`;
-  if (post.registerMap.length) msg += "\nMappa binding:\n" + post.registerMap.map((x) => `  ${x.from} -> ${x.to}`).join("\n");
-  if (post.entryPoint) msg += `\nEntry point HLSL: ${post.entryPoint}`;
-  if (post.warnings.length) msg += "\nAvvisi:\n" + post.warnings.map((w) => "  - " + w).join("\n");
-  if (notes.length) msg += "\n" + notes.join("\n");
-  let validationFailed = false;
-  if (validateProfile) {
-    if (!PROFILE.test(validateProfile)) return fail("validateProfile non valido.");
-    const validationEntry = entry ?? post.entryPoint ?? "main";
-    const r3 = await run(findFxc(), ["/nologo", "/T", validateProfile, "/E", validationEntry, "/Fo", path.join(tmp, "o.cso"), outPath]);
-    if (r3.missing) {
-      validationFailed = true;
-      msg += `\n✖ fxc non disponibile: ${r3.stderr}`;
-    } else if (r3.code === 0) {
-      msg += `\n✔ Validazione FXC riuscita (${validateProfile}, entry ${validationEntry}). Equivalenza e runtime non verificati.`;
-      const diagnostics = (r3.stderr || r3.stdout).trim();
-      if (diagnostics) msg += `\nDiagnostica FXC:\n${diagnostics}`;
-    } else {
-      validationFailed = true;
-      msg += `\n✖ Validazione FXC fallita:\n${r3.stderr || r3.stdout}`;
-    }
-  } else msg += "\nNON validato come SM5 finché non passa fxc (usa validateProfile o compile_sm5).";
-  return validationFailed ? fail(msg) : ok(msg);
 });
 
 // ---------------------------------------------------------------- analyze_dxil

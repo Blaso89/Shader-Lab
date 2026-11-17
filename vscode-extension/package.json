@@ -2,9 +2,13 @@
   "name": "sm6-to-sm5-shader-lab",
   "displayName": "SM6 to SM5 Shader Lab",
   "description": "Dashboard VS Code per analizzare shader SM6/SM5 e ispezionare catture PIX tramite il server MCP",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "local-tools",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Blaso89/Shader-Lab.git"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -13,7 +17,6 @@
   ],
   "activationEvents": [
     "onView:sm6ToSm5.dashboard",
-    "onView:sm6ToSm5.pix",
     "onCommand:sm6ToSm5.openDashboard",
     "onCommand:sm6ToSm5.configureMcp",
     "onCommand:sm6ToSm5.configurePixTools"
@@ -51,12 +54,7 @@
         {
           "type": "webview",
           "id": "sm6ToSm5.dashboard",
-          "name": "SM6 to SM5"
-        },
-        {
-          "type": "webview",
-          "id": "sm6ToSm5.pix",
-          "name": "Cattura PIX"
+          "name": "MCP Dashboard"
         }
       ]
     }

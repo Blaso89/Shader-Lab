@@ -157,8 +157,11 @@ export function postprocessHlsl(
 
   const generatedEntry = metadata.stage ? SPIRV_CROSS_ENTRY[metadata.stage] : undefined;
   const hasMainEntry = /\b(?:void|[\w<>]+)\s+main\s*\(/.test(out);
+  const hasGeneratedEntry = generatedEntry
+    ? new RegExp(`\\b(?:void|[A-Za-z_]\\w*(?:\\s*<[^>]+>)?)\\s+${esc(generatedEntry)}\\s*\\(`).test(out)
+    : false;
   if (hasMainEntry) entryPoint = "main";
-  else if (generatedEntry && new RegExp(`\\bvoid\\s+${generatedEntry}\\s*\\(`).test(out))
+  else if (hasGeneratedEntry)
     entryPoint = generatedEntry;
   if (metadata.stage === "cs" && !metadata.numThreads) {
     warnings.push("NumThreads non presente nel disassemblato DXIL: FXC richiede [numthreads] per il compute shader.");

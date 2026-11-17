@@ -8,7 +8,7 @@ Server MCP per VS Code (Copilot Agent mode / qualsiasi client MCP) che aiuta a p
 ```bash
 npm ci
 npm run build
-npm test          # test di analyzer, converter e protocollo MCP
+npm test          # include test offline del job di precompilazione (FXC simulato)
 ```
 
 Apri la cartella in VS Code: `.vscode/mcp.json` è già pronto. Avvia il server da
@@ -18,8 +18,8 @@ Per usarlo in un altro workspace copia il blocco `servers` nel tuo `.vscode/mcp.
 
 ## Dashboard laterale VS Code
 
-Il progetto include anche `vscode-extension/`, una piccola estensione UI separata
-che aggiunge lo Shader Lab alla Activity Bar. Per provarla:
+Il progetto include anche `vscode-extension/`, un'estensione UI separata che aggiunge
+MCP Dashboard alla Activity Bar con le schede **Shader Lab** e **Cattura PIX**. Per provarla:
 
 1. Compila il server MCP con `npm ci` e `npm run build` dalla cartella principale.
 2. Apri in VS Code la cartella principale `sm6-to-sm5-mcp`, così viene caricata la
@@ -29,8 +29,22 @@ che aggiunge lo Shader Lab alla Activity Bar. Per provarla:
    `F5` nella cartella `vscode-extension/` per usare l'Extension Development Host.
 5. Apri Shader Lab dalla Activity Bar e usa Copilot Chat in modalità Agent.
 
-La dashboard seleziona gli input e prepara una richiesta per il tool MCP
-corrispondente in Copilot Chat. Il controllo Live osserva il log MCP della finestra,
+Il dashboard usa la configurazione MCP utente di VS Code (`User/mcp.json` o quella del profilo attivo);
+il file workspace `.vscode/mcp.json` serve invece per avviare il server dal workspace. In caso di
+percorso server memorizzato obsoleto, la root ricavata dal server effettivamente configurato nel profilo
+ha priorità sul valore locale salvato dall'estensione.
+
+Le azioni di analisi/conversione esistenti selezionano gli input e preparano una richiesta per il tool MCP
+corrispondente in Copilot Chat. **Precompilazione DXIL locale** è invece un job posseduto dall'extension host:
+seleziona una cartella di input, una base di staging separata e una mappa binding JSON opzionale, poi mostra
+avanzamento e permette l'annullamento cooperativo. Gli output `.cso` sono scritti in una nuova sottocartella
+`ShaderLab-Staging-*` e nominati con FNV-1a64 dei byte del container DXIL originale, come nel proxy.
+File senza disassemblato, stage non riconosciuto, blocker SM6, entry point non identificato o register space
+senza mappa non vengono compilati. FXC conferma solo la compilazione: non l'equivalenza, la compatibilità
+della firma PS con il VS abbinato o il rendering. Gli output restano staging; la UI non li pubblica negli
+override attivi e non avvia il gioco.
+
+Il pill mostra se il server è compilato e associato al profilo; il controllo Live osserva il log MCP della finestra,
 ricava l'ID completo usato da VS Code e apre le stesse opzioni server di
 **MCP: List Servers** per `sm6-to-sm5`. Le righe di connessione aggiornano il pallino
 senza aprire pannelli; se il log non esiste ancora, il primo clic apre l'elenco MCP.
@@ -40,7 +54,7 @@ La lettura dipende dal formato dei log della versione VS Code installata.
 
 | Strumento | Serve per | Impostazione |
 |---|---|---|
-| `fxc.exe` (Windows SDK) | `compile_sm5`: validazione reale SM5 | `FXC_PATH` (auto-rilevato su Windows) |
+| `fxc.exe` (Windows SDK) | `compile_sm5` e precompilazione locale: compilazione reale SM5 | `FXC_PATH` (auto-rilevato su Windows) |
 | `pixtool.exe` (PIX) | Analisi PIX completa ed export locale | Auto-rilevato o selezionato nella scheda Cattura PIX |
 | `dxc.exe` (Windows SDK) | Disassemblaggio e analisi dei payload PIX | Auto-rilevato o selezionato nella scheda Cattura PIX |
 | PowerShell | Decompressione locale dei payload PIX | PowerShell di Windows o percorso selezionato nella scheda |
@@ -71,7 +85,12 @@ tra versioni: se il tool fallisce, controlla `dxil-spirv --help`.
 
 ## Catture PIX
 
-Lo Shader Lab include una vista Activity Bar dedicata **Cattura PIX**. Consente di scegliere il `.wpix`, la cartella di output, un export C++ già esistente o l'export automatico con pixtool, e un event list PIX già esportato. La vista include anche azioni per cercare eventi nell'event list e per esportare il render target di una draw. Gli eseguibili sono rilevati sul PC corrente o collegati con i selettori nativi di VS Code. La configurazione è per utente, quindi installare il plugin su un altro Windows non riutilizza percorsi assoluti della workstation originale.
+La scheda **Cattura PIX** nel dashboard consente di scegliere il `.wpix`, la cartella di output,
+un export C++ già esistente o l'export automatico con pixtool, e un event list PIX già esportato.
+Include anche azioni per cercare eventi nell'event list ed esportare il render target di una draw.
+Gli eseguibili sono rilevati sul PC corrente o collegati con i selettori nativi di VS Code.
+La configurazione è per utente, quindi installare il plugin su un altro Windows non riutilizza
+percorsi assoluti della workstation originale.
 
 La modalità `scan` resta read-only: legge header e blocchi limitati, non decodifica il formato e non avvia PIX/pixtool. La modalità `full` scrive gli artefatti solo nella cartella selezionata; l'analisi dei payload è statica e non dimostra equivalenza visiva o compatibilità runtime D3D11. I marker `GFXA`/`GFXB`/`GFXC` e `DXBC` trovati dalla scansione non sono prova di chunk, PSO o shader. Pixtool esporta l'event list senza filtro queue; il `Queue ID` identifica la riga/evento nella queue, non la queue stessa. La label (per esempio `Graphics Queue 1`) resta un'attestazione visiva dell'utente e un event list manuale non prova la propria cattura o queue di origine. Prima di `save-resource`, il gate richiede una singola riga con `Global ID`, `Queue ID` coincidente e nome di evento draw.
 
@@ -103,8 +122,9 @@ array di risorse unbounded.
 4. Limiti D3D11 non verificati automaticamente: 32 KB di groupshared, 8 UAV (pixel/compute 64 con FL11.1),
    dimensione dei cbuffer. `compile_sm5` ne intercetta alcuni.
 5. La pipeline DXIL→HLSL produce codice decompilato: nomi persi, register derivati dai binding SPIR-V.
-6. `compile_sm5` e il rilevamento automatico di fxc funzionano su Windows; su Linux/macOS serve Wine o un fxc esterno.
-7. Testati: analyzer, converter, protocollo MCP e rigenerazione/validazione FXC dei campioni Hela.
+6. La precompilazione in batch richiede i disassemblati DXC associati ai file DXIL. La cancellazione è cooperativa e attende il processo esterno attivo; i test automatici simulano FXC e non provano il caricamento dal proxy.
+7. `compile_sm5`, la precompilazione locale e il rilevamento automatico di fxc funzionano su Windows; su Linux/macOS serve Wine o un fxc esterno.
+8. Testati: analyzer, converter, protocollo MCP, test offline del job con runner simulato e rigenerazione/validazione FXC dei campioni Hela.
    In questa workstation i due convertitori sono installati e configurati nel profilo MCP.
 
 ## Versioni usate nei test (vedi `samples/REPORT_Hela_samples.md`)
