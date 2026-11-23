@@ -2,7 +2,7 @@
   "name": "sm6-to-sm5-shader-lab",
   "displayName": "SM6 to SM5 Shader Lab",
   "description": "Dashboard VS Code per analizzare shader SM6/SM5 e ispezionare catture PIX tramite il server MCP",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "local-tools",
   "license": "MIT",
   "repository": {
