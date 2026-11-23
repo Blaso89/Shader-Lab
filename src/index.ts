@@ -14,6 +14,7 @@ import {
 } from "./dxil-analyzer.js";
 import { convertDxilToHlsl } from "./dxil-precompile.js";
 import { registerPixTool } from "./pix-tool.js";
+import { registerHelaPipelineTools } from "./hela-mcp-tools.js";
 
 const server = new McpServer({ name: "sm6-to-sm5", version: "0.1.0" });
 const ok = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
@@ -274,5 +275,6 @@ server.registerTool("check_toolchain", {
 });
 
 registerPixTool(server);
+registerHelaPipelineTools(server);
 
 await server.connect(new StdioServerTransport());

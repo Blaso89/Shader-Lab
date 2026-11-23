@@ -83,6 +83,13 @@ tra versioni: se il tool fallisce, controlla `dxil-spirv --help`.
 - `export_pix_draw_resource`: verifica che il `Global ID` identifichi una sola draw event e che la stessa riga abbia il `Queue ID` richiesto prima di invocare `save-resource`. Non esporta se l'identificazione è ambigua, il Queue ID non coincide o la riga non è una draw.
 - `check_toolchain`.
 
+### Integrazione con il proxy Hela
+
+- `inspect_hela_proxy_log` analizza in sola lettura i log del proxy e separa shader/PSO, draw e readback; le correlazioni draw→backbuffer restano candidate e non sono una prova causale.
+- `build_hela_override_stage` riusa la pipeline DXIL→HLSL→FXC e scrive solo in una nuova cartella di staging. Con un manifest baseline richiede tutti gli override baseline e ne verifica gli SHA-256; non installa file e non avvia Hela.
+- `plan_hela_manifest_patch` produce un manifest candidato separato, preservando gli override baseline e rifiutando percorsi esistenti o protetti.
+- `verify_hela_run` legge una run archiviata, usa il contatore readback per il target richiesto e considera solo BMP nominati per quel `Present`. Pixel non neri non dimostrano che il menu sia corretto: `menuValidated` rimane sempre `false`.
+
 ## Catture PIX
 
 La scheda **Cattura PIX** nel dashboard consente di scegliere il `.wpix`, la cartella di output,

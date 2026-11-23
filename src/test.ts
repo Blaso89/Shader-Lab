@@ -47,6 +47,7 @@ import { postprocessHlsl } from "./hlsl-post.js";
 import { analyzeSource, DEFAULT_LIMITS, findPixTool, resolveLimits, type ByteSource } from "./pix-capture.js";
 import { exportPixDrawResource, listPixEvents, parsePixEventListText } from "./pix-events.js";
 import { runPrecompileTests } from "./precompile-test.js";
+import { runHelaPipelineTests } from "./hela-pipeline-test.js";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -479,4 +480,5 @@ const resourcePrompt = buildPixResourcePrompt({ pixPath: "capture.wpix", globalI
 assert.match(resourcePrompt, /export_pix_draw_resource/);
 assert.match(resourcePrompt, /stessa riga/);
 await runPrecompileTests();
+await runHelaPipelineTests();
 console.log("\nTUTTI I TEST OK");

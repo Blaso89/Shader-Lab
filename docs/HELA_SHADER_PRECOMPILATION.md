@@ -87,15 +87,19 @@ Stati terminali implementati: `compiled`, `blocked`, `failed`, `skipped`, `cance
 
 Nel proxy, `LoadShader` calcola `Fnv1a64(data, size)` sul bytecode ricevuto (`d3d12on11/src/pipeline.cpp:37`), ne formatta il testo (`:38`) e cerca `<hash>.cso` nella directory override (`:57`). L'override viene accettato solo se il container è DXBC legacy e il modello è al massimo SM5 (`:60`). Il dump salva gli stessi byte ricevuti (`:83`, `:85`).
 
-Quindi il nome del `.cso` è calcolato dall'esatto container originale hashato dal proxy, non dall'HLSL candidato né da un contenitore estratto o normalizzato. `Fnv1a64` e `Hex64` sono stati verificati direttamente in `d3d12on11/src/util.cpp`: offset basis `14695981039346656037`, prime `1099511628211`, wrap uint64 e output lowercase zero-padded a 16 cifre. Il test locale controlla il vettore noto `"hello" → a430d84680aabd0b` e il nome output; il confronto con un hash prodotto dal proxy sugli stessi byte (T-N2) e lo smoke test proxy (T-N3) non sono ancora eseguiti. Per questo gli output restano in staging.
+Quindi il nome del `.cso` è calcolato dall'esatto container originale hashato dal proxy, non dall'HLSL candidato né da un contenitore estratto o normalizzato. `Fnv1a64` e `Hex64` sono stati verificati direttamente in `d3d12on11/src/util.cpp`: offset basis `14695981039346656037`, prime `1099511628211`, wrap uint64 e output lowercase zero-padded a 16 cifre. Il test locale controlla il vettore noto `"hello" → a430d84680aabd0b` e il nome output.
+
+**Esito offline del 17/11/2026:** T-N2 ha confrontato quattro bytecode DXIL dumpati dal proxy; hash TypeScript e nomi/hash del proxy hanno coinciso in 4/4 casi. T-N3 ha usato il candidato compute `bb592abf5ce2bad1` (`cs_6_6`): Shader Lab 0.1.7 ha prodotto un `.cso` da 1288 byte, verificato come DXBC legacy senza chunk DXIL e modello `5_0`. Il test smoke isolato, ricompilato per richiedere esattamente `S_OK` e un PSO non nullo, è terminato con exit code 0; il log del proxy riporta `source=SM5-override`, `PSO COMPUTE ... status=ready`, `missing_mask=0x00` e `d11_cs=1`, senza errori di creazione o placeholder. Hela non è stato avviato.
+
+Questi risultati verificano il naming e il caricamento/creazione del PSO per questa fixture; non verificano dispatch, completamento GPU, equivalenza semantica o rendering di Hela. Il `.cso` non è stato pubblicato nella directory override attiva e gli output restano in staging.
 
 Gate offline obbligatori:
 
 1. **T-N1:** vettori noti FNV-1a64 in TypeScript e test del formatter contro il formato del proxy.
-2. **T-N2:** per fixture DXIL/container, hash calcolato in TypeScript uguale all'hash registrato dal proxy per gli stessi byte. Fixture e valore atteso sono dati di test; non serve avviare il gioco.
-3. **T-N3:** test smoke del proxy che carichi un `.cso` prodotto e nominato con l'hash TypeScript, aspettandosi esito `S_OK`.
+2. **T-N2 — superato (4/4):** per quattro fixture DXIL, hash TypeScript uguale al nome/hash registrato dal proxy per gli stessi byte.
+3. **T-N3 — superato per la fixture compute:** test smoke del proxy carica il `.cso` prodotto e nominato con l'hash TypeScript; il test richiede esattamente `S_OK` e un PSO non nullo.
 
-Fino al superamento di T-N2, il job può produrre artefatti candidati in una directory di staging, ma non deve dichiararli override compatibili né pubblicarli nella directory attiva del proxy.
+T-N2 e T-N3 superati non dimostrano equivalenza o rendering. Gli artefatti restano candidati in staging; la pubblicazione nella directory attiva del proxy non è stata eseguita.
 
 ## 7. Staging, atomicità e cache futura
 
@@ -115,7 +119,8 @@ Test aggiuntivi, offline, attualmente eseguiti con runner FXC simulato:
 - **T-A1:** errore FXC simulato non lascia `.cso` parziali visibili.
 - **T-X1:** cancellazione dopo la snapshot è osservata prima del file o dopo la conversione, prima di FXC; nessun output parziale resta visibile.
 - **T-P1:** caricamento dinamico ESM da CJS verificato con Node; JS host/webview passa `node --check`.
-- **Da fare:** mutation dopo snapshot, cancel durante una fase esterna attiva, UI nel VS Code Extension Development Host, T-N2/T-N3, cache e smoke del proxy.
+- **T-N2/T-N3:** superati offline il 17/11/2026 per quattro fixture hash e una fixture compute; smoke manuale isolato, non registrato come test CTest.
+- **Da fare:** mutation dopo snapshot, cancel durante una fase esterna attiva, UI nel VS Code Extension Development Host, automazione del fixture smoke, cache.
 
 Criteri misurabili:
 
@@ -130,15 +135,15 @@ Criteri misurabili:
 
 1. **Completato — Core e prima UI:** conversione condivisa, batch sequenziale, progress, stati, cancellazione cooperativa e staging atomico.
 2. **Da fare — Runtime UI:** validare il flusso completo nel VS Code Extension Development Host con toolchain reale.
-3. **Da fare — Gate hash:** T-N2 e T-N3 per verificare il matching con il proxy end-to-end.
+3. **Completato — Gate hash:** T-N2 (4/4) e T-N3 (fixture compute, esito esatto `S_OK`) verificano il matching e il caricamento nel proxy isolato; non attestano equivalenza o rendering.
 4. **Da fare — Manifest e ripresa:** cache e riavvio controllato, dopo test della chiave.
-5. **Da fare — Smoke proxy:** integrare fixture output nel test `d3d12on11_shader_override_smoke`, senza avviare Hela.
+5. **Da fare — Automazione smoke proxy:** rendere ripetibile tramite test runner il fixture usato da `d3d12on11_shader_override_smoke`; la prova manuale isolata è riuscita senza avviare Hela.
 
 Ogni milestone è fail-closed rispetto ai propri prerequisiti; nessuna avvia Hela o genera traffico.
 
 ## 10. Rischi e prerequisiti aperti
 
-- **Parità FNV e formato Hex64:** implementazione verificata in `util.cpp`; T-N2/T-N3 prima di qualsiasi uso runtime degli override.
+- **Parità FNV e formato Hex64:** implementazione verificata in `util.cpp`; T-N2/T-N3 superati per i fixture indicati, ma non provano equivalenza né rendering.
 - **Interop ESM/CommonJS:** import dinamico verificato con Node, non ancora nel runtime VS Code.
 - **Progress:** l'extension host invia il progresso per file alla Webview; non dipende dal protocollo MCP.
 - **Cancellazione:** `run()` non è interrompibile a metà processo nella v1; documentare il limite del timeout o implementare terminazione testata.
@@ -151,4 +156,4 @@ Ogni milestone è fail-closed rispetto ai propri prerequisiti; nessuna avvia Hel
 
 Implementazione corrente: `src/dxil-precompile.ts`, `src/index.ts`, `src/hlsl-post.ts`, `src/test.ts`, `src/precompile-test.ts`, `vscode-extension/extension.js`, `vscode-extension/media/dashboard.js` e `vscode-extension/media/dashboard.css`. La base architetturale era `main` al commit `23b73f61cdd2a22fef6e5bbf109d8b280d5de3d8`; le modifiche descritte qui sono nel worktree locale e non sono incluse in quel commit.
 
-Il formato hash è stato confrontato con `d3d12on11/src/util.cpp` e il nome output ha un test locale FNV-1a64. Test passati: `npm run build`, `npm test`, `node --check` per host e Webview, import dinamico ESM da CJS con Node e `git diff --check`. I test batch usano una toolchain simulata: non attestano una conversione reale, un caricamento nel runtime VS Code, compatibilità visiva o funzionamento del proxy. Hela non è stato avviato.
+Il formato hash è stato confrontato con `d3d12on11/src/util.cpp` e il nome output ha un test locale FNV-1a64. Test passati: `npm run build`, `npm test`, `node --check` per host e Webview, import dinamico ESM da CJS con Node e `git diff --check`. In aggiunta, T-N2 ha dato 4/4 hash coincidenti; la conversione reale della fixture `bb592abf5ce2bad1` è riuscita con Shader Lab 0.1.7 e T-N3 ha creato il PSO nel proxy isolato con controllo stretto `S_OK`. I test batch con toolchain simulata non attestano una conversione reale; il caricamento smoke non prova dispatch, completamento GPU, compatibilità visiva, equivalenza semantica o funzionamento in Hela. Hela non è stato avviato.

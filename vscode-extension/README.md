@@ -30,6 +30,13 @@ corrispondente.
 - Validazione con FXC: `compile_sm5`
 - Verifica degli strumenti esterni: `check_toolchain`
 
+Se il server MCP è compilato dalla cartella principale aggiornata, sono disponibili anche:
+
+- `inspect_hela_proxy_log`: analisi read-only dei log del proxy Hela.
+- `build_hela_override_stage`: generazione di candidati SM5 in staging isolato.
+- `plan_hela_manifest_patch`: creazione di un manifest candidato separato.
+- `verify_hela_run`: verifica read-only della run e dei BMP del target; pixel non neri non dimostrano che il menu sia valido.
+
 La vista **Cattura PIX** separa la scansione statica read-only dall'analisi completa.
 La modalità completa seleziona il `.wpix`, la cartella output, un export C++ esistente
 oppure l'export tramite pixtool, e un event list opzionale. Estrae i payload shader,
