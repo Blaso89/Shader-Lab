@@ -1,6 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseHelaProxyLogFile } from "./hela-log-parser.js";
 import {
   buildHelaOverrideStage,
@@ -18,6 +20,38 @@ import {
  *   registerHelaPipelineTools(server);
  */
 export function registerHelaPipelineTools(server: McpServer): void {
+  server.registerTool("build_hela_run_evidence", {
+    title: "Costruisce bundle di evidenze run Hela (offline)",
+    description:
+      "Legge runDir/packageDir in sola lettura, applica il package gate staged-only e scrive run-evidence.json/report in una nuova outDir. " +
+      "Non avvia Hela, non installa DLL/override e mantiene menuVerified=false/verdict unverified.",
+    inputSchema: {
+      runDir: z.string().min(1).describe("Cartella run archiviata da ProxyManager"),
+      packageDir: z.string().min(1).describe("Cartella package staged-only"),
+      outDir: z.string().min(1).describe("Nuova cartella output, non deve esistere"),
+      targetPresent: z.number().int().min(1).optional().describe("Present target da cui filtrare i BMP"),
+    },
+  }, async (args) => {
+    try {
+      const modulePath = path.resolve(process.cwd(), "tools/hela-package/run-evidence.mjs");
+      if (!fs.existsSync(modulePath)) {
+        throw new Error(`Modulo evidenze Hela non trovato: ${modulePath}`);
+      }
+      const module = await import(pathToFileURL(modulePath).href) as {
+        buildRunEvidence: (options: {
+          runDir: string;
+          packageDir: string;
+          outDir: string;
+          targetPresent?: number;
+        }) => Promise<{ bundle: unknown; report: unknown }>;
+      };
+      const result = await module.buildRunEvidence(args);
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+    } catch (e) {
+      return { isError: true, content: [{ type: "text" as const, text: "build_hela_run_evidence: " + String(e) }] };
+    }
+  });
+
   server.registerTool("inspect_hela_proxy_log", {
     title: "Analizza log proxy Hela (read-only)",
     description:

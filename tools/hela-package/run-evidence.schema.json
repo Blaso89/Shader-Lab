@@ -1,8 +1,9 @@
+
 {
 "$schema": "https://json-schema.org/draft/2020-12/schema",
 "$id": "hela://schemas/run-evidence/1",
 "title": "Hela run evidence bundle",
-"description": "Collega manager-run.json, report del monitor, manifest/inventario, log e BMP della stessa run tramite runId e hash reciproci. Distingue configurazione richiesta, override caricati, target di readback ed evidenza visiva. Design artifact: non ancora enforced dal codice (P1). Il verdetto menu di default e' unverified; Present o pixel non neri non bastano.",
+"description": "Collega manager-run.json, report del monitor, manifest/inventario, log e BMP della stessa run tramite runId e hash reciproci. Distingue configurazione richiesta, override caricati, target di readback ed evidenza visiva. Il verdetto menu di default e' unverified; Present o pixel non neri non bastano. Rev 1.1: campi opzionali kind/causalChain su readback per rappresentare evidenza candidate-only prima del wiring UID nel proxy.",
 "type": "object",
 "additionalProperties": false,
 "required": ["schemaVersion", "runId", "package", "configuration", "loadedOverrides", "readback", "visual", "verdict"],
@@ -31,7 +32,7 @@
 }
 },
 "loadedOverrides": {
-"description": "Cio' che il loader ha effettivamente caricato/saltato/fallito, con hash verificati (fonte: pipeline.cpp log JSONL).",
+"description": "Cio' che il loader ha effettivamente caricato/saltato/fallito, con hash (fonte: righe SHADER READY source=SM5-override del log proxy).",
 "type": "object",
 "additionalProperties": false,
 "required": ["loaderLog", "entries"],
@@ -72,7 +73,7 @@
 }
 },
 "readback": {
-"description": "BMP della catena draw->copy->readback verificata tramite StableResourceId e timeline (fonte: commands.cpp). nonBlackFraction e' evidenza di catena, mai di menu.",
+"description": "BMP della run. Finche' il wiring causal_trace non e' attivo nel proxy, targetResourceId puo' essere 'unresolved', frameIndex e' il contatore Present e causalChain.status e' 'candidate-only': questa NON e' prova causale ne' visiva.",
 "type": "array",
 "items": {
 "type": "object",
@@ -83,7 +84,17 @@
 "targetResourceId": { "type": "string", "minLength": 1 },
 "frameIndex": { "type": "integer", "minimum": 0 },
 "copyChainRef": { "type": "string", "minLength": 1 },
-"nonBlackFraction": { "type": "number", "minimum": 0, "maximum": 1 }
+"nonBlackFraction": { "type": "number", "minimum": 0, "maximum": 1 },
+"kind": { "enum": ["source", "backbuffer"] },
+"causalChain": {
+"type": "object",
+"additionalProperties": false,
+"required": ["status"],
+"properties": {
+"status": { "enum": ["unproven", "candidate-only", "proven-by-uid-timeline"] },
+"limitations": { "type": "array", "items": { "type": "string" } }
+}
+}
 }
 }
 },

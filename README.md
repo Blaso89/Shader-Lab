@@ -91,6 +91,7 @@ tra versioni: se il tool fallisce, controlla `dxil-spirv --help`.
 - Se `runtimeDir` è indicato al tool di staging, Shader Lab copia in staging `d3d12.dll` e `dxgi.dll`, genera `candidate-package.json` e esegue il gate offline `tools/hela-package/package-gate.mjs`. Il gate verifica runtime/override/manifest, scrive `override-inventory.json` e `package-report.json` e mantiene sempre `lifecycle: staged-only`.
 - `plan_hela_manifest_patch` produce un manifest candidato separato, preservando gli override baseline e rifiutando percorsi esistenti o protetti.
 - `verify_hela_run` legge una run archiviata, usa il contatore readback per il target richiesto e considera solo BMP nominati per quel `Present`. Pixel non neri non dimostrano che il menu sia corretto: `menuValidated` rimane sempre `false`.
+- `build_hela_run_evidence` collega offline package, manifest, run, log e BMP in una nuova cartella, applicando il package gate staged-only. Mantiene il verdetto menu `unverified`; non avvia Hela o non installa DLL/override.
 
 ## Catture PIX
 
