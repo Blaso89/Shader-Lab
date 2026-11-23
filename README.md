@@ -9,6 +9,7 @@ Server MCP per VS Code (Copilot Agent mode / qualsiasi client MCP) che aiuta a p
 npm ci
 npm run build
 npm test          # include test offline del job di precompilazione (FXC simulato)
+npm run test:hela-package # gate offline di package Hela, senza DLL reali/rete
 ```
 
 Apri la cartella in VS Code: `.vscode/mcp.json` è già pronto. Avvia il server da
@@ -87,6 +88,7 @@ tra versioni: se il tool fallisce, controlla `dxil-spirv --help`.
 
 - `inspect_hela_proxy_log` analizza in sola lettura i log del proxy e separa shader/PSO, draw e readback; le correlazioni draw→backbuffer restano candidate e non sono una prova causale.
 - `build_hela_override_stage` riusa la pipeline DXIL→HLSL→FXC e scrive solo in una nuova cartella di staging. Con un manifest baseline richiede tutti gli override baseline e ne verifica gli SHA-256; non installa file e non avvia Hela.
+- Se `runtimeDir` è indicato al tool di staging, Shader Lab copia in staging `d3d12.dll` e `dxgi.dll`, genera `candidate-package.json` e esegue il gate offline `tools/hela-package/package-gate.mjs`. Il gate verifica runtime/override/manifest, scrive `override-inventory.json` e `package-report.json` e mantiene sempre `lifecycle: staged-only`.
 - `plan_hela_manifest_patch` produce un manifest candidato separato, preservando gli override baseline e rifiutando percorsi esistenti o protetti.
 - `verify_hela_run` legge una run archiviata, usa il contatore readback per il target richiesto e considera solo BMP nominati per quel `Present`. Pixel non neri non dimostrano che il menu sia corretto: `menuValidated` rimane sempre `false`.
 

@@ -1,0 +1,170 @@
+{
+"$schema": "https://json-schema.org/draft/2020-12/schema",
+"$id": "hela://schemas/run-evidence/1",
+"title": "Hela run evidence bundle",
+"description": "Collega manager-run.json, report del monitor, manifest/inventario, log e BMP della stessa run tramite runId e hash reciproci. Distingue configurazione richiesta, override caricati, target di readback ed evidenza visiva. Design artifact: non ancora enforced dal codice (P1). Il verdetto menu di default e' unverified; Present o pixel non neri non bastano.",
+"type": "object",
+"additionalProperties": false,
+"required": ["schemaVersion", "runId", "package", "configuration", "loadedOverrides", "readback", "visual", "verdict"],
+"properties": {
+"schemaVersion": { "const": 1 },
+"runId": { "type": "string", "minLength": 1 },
+"package": {
+"description": "Artefatti del package candidato (staged-only prima dell'autorizzazione).",
+"type": "object",
+"additionalProperties": false,
+"required": ["manifest", "inventory", "packageReport"],
+"properties": {
+"manifest": { "$ref": "#/$defs/fileRef" },
+"inventory": { "$ref": "#/$defs/fileRef" },
+"packageReport": { "$ref": "#/$defs/fileRef" }
+}
+},
+"configuration": {
+"description": "Cio' che e' stato richiesto alla run (non prova che sia stato caricato).",
+"type": "object",
+"additionalProperties": false,
+"required": ["managerRun", "requestedOverrides"],
+"properties": {
+"managerRun": { "$ref": "#/$defs/fileRef" },
+"requestedOverrides": { "type": "array", "items": { "type": "string" } }
+}
+},
+"loadedOverrides": {
+"description": "Cio' che il loader ha effettivamente caricato/saltato/fallito, con hash verificati (fonte: pipeline.cpp log JSONL).",
+"type": "object",
+"additionalProperties": false,
+"required": ["loaderLog", "entries"],
+"properties": {
+"loaderLog": { "$ref": "#/$defs/fileRef" },
+"entries": {
+"type": "array",
+"items": {
+"type": "object",
+"additionalProperties": false,
+"required": ["id", "path", "sha256", "result"],
+"properties": {
+"id": { "type": "string", "minLength": 1 },
+"path": { "type": "string", "minLength": 1 },
+"sha256": { "$ref": "#/$defs/sha256" },
+"result": { "enum": ["loaded", "skipped", "failed"] }
+}
+}
+}
+}
+},
+"monitor": {
+"type": "object",
+"additionalProperties": false,
+"required": ["report"],
+"properties": { "report": { "$ref": "#/$defs/fileRef" } }
+},
+"logs": {
+"type": "array",
+"items": {
+"type": "object",
+"additionalProperties": false,
+"required": ["kind", "file"],
+"properties": {
+"kind": { "type": "string", "minLength": 1 },
+"file": { "$ref": "#/$defs/fileRef" }
+}
+}
+},
+"readback": {
+"description": "BMP della catena draw->copy->readback verificata tramite StableResourceId e timeline (fonte: commands.cpp). nonBlackFraction e' evidenza di catena, mai di menu.",
+"type": "array",
+"items": {
+"type": "object",
+"additionalProperties": false,
+"required": ["bmp", "targetResourceId", "frameIndex", "copyChainRef"],
+"properties": {
+"bmp": { "$ref": "#/$defs/fileRef" },
+"targetResourceId": { "type": "string", "minLength": 1 },
+"frameIndex": { "type": "integer", "minimum": 0 },
+"copyChainRef": { "type": "string", "minLength": 1 },
+"nonBlackFraction": { "type": "number", "minimum": 0, "maximum": 1 }
+}
+}
+},
+"visual": {
+"description": "Evidenza visuale: checklist menu esplicita. null = non testato (default).",
+"type": "object",
+"additionalProperties": false,
+"required": ["menuChecklist"],
+"properties": {
+"menuChecklist": {
+"oneOf": [
+{ "type": "null" },
+{
+"type": "array",
+"minItems": 1,
+"items": {
+"type": "object",
+"additionalProperties": false,
+"required": ["item", "status"],
+"properties": {
+"item": { "type": "string", "minLength": 1 },
+"status": { "enum": ["pass", "fail", "not-tested"] }
+}
+}
+}
+]
+},
+"baselineRef": { "type": ["string", "null"] }
+}
+},
+"verdict": {
+"type": "object",
+"additionalProperties": false,
+"required": ["menu"],
+"properties": {
+"menu": {
+"enum": ["unverified", "failed", "verified-with-checklist"],
+"default": "unverified"
+},
+"notes": { "type": "string" }
+}
+}
+},
+"allOf": [
+{
+"description": "verified-with-checklist richiede almeno un readback, checklist tutta pass e almeno un override caricato. Compilazione/PSO/Present/pixel non neri non abilitano questo verdetto.",
+"if": {
+"properties": {
+"verdict": { "properties": { "menu": { "const": "verified-with-checklist" } } }
+}
+},
+"then": {
+"properties": {
+"readback": { "minItems": 1 },
+"loadedOverrides": { "properties": { "entries": { "minItems": 1 } } },
+"visual": {
+"properties": {
+"menuChecklist": {
+"type": "array",
+"minItems": 1,
+"items": {
+"required": ["status"],
+"properties": { "status": { "const": "pass" } }
+}
+}
+}
+}
+}
+}
+}
+],
+"$defs": {
+"sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+"fileRef": {
+"type": "object",
+"additionalProperties": false,
+"required": ["path", "sha256"],
+"properties": {
+"path": { "type": "string", "minLength": 1 },
+"sha256": { "$ref": "#/$defs/sha256" }
+}
+}
+}
+}

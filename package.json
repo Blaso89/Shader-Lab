@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "node dist/test.js"
+    "test": "node dist/test.js",
+    "test:hela-package": "node --test tools/hela-package/package-gate.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",

@@ -88,6 +88,7 @@ export function registerHelaPipelineTools(server: McpServer): void {
       logPath: z.string().optional().describe("Percorso di d3d12on11.log per pairing VS<->PS"),
       baselineManifestPath: z.string().optional().describe("Manifest baseline hela-run-manifest/v1 (sola lettura)"),
       baselineOverridesDir: z.string().optional().describe("Cartella .cso baseline per validare PS contro VS esistenti"),
+      runtimeDir: z.string().optional().describe("Cartella contenente d3d12.dll e dxgi.dll; se indicata, crea candidate-package.json e applica il package gate staged-only"),
       bindingMapPath: z.string().optional().describe("JSON mappa register space condivisa col proxy"),
       testVersion: z.string().optional().describe("testVersion per il manifest candidato"),
       autoDisassemble: z.boolean().default(true).describe("Invoca dxc -dumpbin nello staging per .dxil senza *_dxil.txt"),

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as dxilAnalyzer from "./dxil-analyzer.js";
 import {
   analyzeDisasm,
@@ -90,6 +91,7 @@ export interface BuildHelaStageOptions {
   logPath?: string;
   baselineManifestPath?: string;
   baselineOverridesDir?: string;
+  runtimeDir?: string;
   bindingMapPath?: string;
   testVersion?: string;
   autoDisassemble?: boolean;
@@ -106,6 +108,7 @@ export interface BuildHelaStageDependencies {
   runner?: typeof run;
   fxcPath?: () => string;
   dxcPath?: () => string;
+  packageGate?: (stagingDir: string, opts?: { mode?: "build" | "check" }) => Promise<HelaPackageGateReport>;
 }
 
 export interface BuildHelaStageReport {
@@ -120,7 +123,24 @@ export interface BuildHelaStageReport {
   newCandidatesIncluded: number;
   unmappedRegisterSpaces: Array<{ hash: string; stage: string; bindings: string[] }>;
   entries: StagedShaderEntry[];
+  packageGate?: HelaPackageGateReport;
   disclaimer: string;
+}
+
+export interface HelaPackageGateReport {
+  schemaVersion: number;
+  tool: string;
+  toolVersion: string;
+  mode: "build" | "check";
+  stagingDir: string;
+  packageId: string | null;
+  ok: boolean;
+  lifecycle: "staged-only";
+  installed: boolean;
+  networkUsed: boolean;
+  issues: Array<{ code: string; message: string; [key: string]: unknown }>;
+  warnings: Array<{ code: string; message: string; [key: string]: unknown }>;
+  [key: string]: unknown;
 }
 
 export interface PlanManifestPatchOptions {
@@ -257,6 +277,24 @@ export function findDxc(overridePath?: string): string {
 function isWithin(parent: string, child: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+async function defaultHelaPackageGate(
+  stagingDir: string,
+  opts: { mode?: "build" | "check" } = {},
+): Promise<HelaPackageGateReport> {
+  const gateCandidates = [
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../tools/hela-package/package-gate.mjs"),
+    path.resolve(process.cwd(), "tools/hela-package/package-gate.mjs"),
+  ];
+  const gatePath = gateCandidates.find((candidate) => fs.existsSync(candidate));
+  if (!gatePath) {
+    throw new Error("Gate package Hela non trovato: tools/hela-package/package-gate.mjs.");
+  }
+  const gateModule = await import(pathToFileURL(gatePath).href) as unknown as {
+    runPackageGate: (dir: string, options?: { mode?: "build" | "check" }) => Promise<HelaPackageGateReport>;
+  };
+  return gateModule.runPackageGate(stagingDir, opts);
 }
 
 function assertNotProtectedGamePath(targetPath: string, role: string): void {
@@ -875,6 +913,7 @@ export async function buildHelaOverrideStage(
   let manifestPath: string | undefined;
   let baselineOverridesPreserved = 0;
   let newCandidatesIncluded = 0;
+  let packageGateReport: HelaPackageGateReport | undefined;
 
   if (baselineManifest) {
     const manifestOverrides: Record<string, string> = {};
@@ -938,6 +977,55 @@ export async function buildHelaOverrideStage(
     };
     manifestPath = path.join(stagingDir, "run-manifest.candidate.json");
     fs.writeFileSync(manifestPath, JSON.stringify(candidateManifest, null, 2) + "\n", "utf8");
+
+    if (options.runtimeDir) {
+      const runtimeDir = path.resolve(options.runtimeDir);
+      assertNotProtectedGamePath(runtimeDir, "runtimeDir");
+      if (!fs.existsSync(runtimeDir) || !fs.statSync(runtimeDir).isDirectory()) {
+        throw new Error(`runtimeDir non valida: ${runtimeDir}`);
+      }
+
+      const runtimeOutputDir = path.join(stagingDir, "runtime");
+      fs.mkdirSync(runtimeOutputDir, { recursive: true });
+      const runtimeEntries: Array<{ path: string; sha256: string; bytes: number }> = [];
+      for (const name of ["d3d12.dll", "dxgi.dll"]) {
+        const source = path.join(runtimeDir, name);
+        if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
+          throw new Error(`Runtime DLL mancante in runtimeDir: ${source}`);
+        }
+        const bytes = fs.readFileSync(source);
+        const digest = sha256Buffer(bytes);
+        const manifestRole = name === "d3d12.dll" ? "d3d12" : "dxgi";
+        const expectedDigest = candidateManifest.runtime[manifestRole];
+        if (expectedDigest && digest.toLowerCase() !== expectedDigest.toLowerCase()) {
+          throw new Error(
+            `Hash runtime ${name} diverso dal manifest: atteso ${expectedDigest}, trovato ${digest}`,
+          );
+        }
+        fs.copyFileSync(source, path.join(runtimeOutputDir, name));
+        runtimeEntries.push({ path: `runtime/${name}`, sha256: digest, bytes: bytes.length });
+      }
+
+      const overrideEntries = Object.entries(sortedOverrides).map(([name, digest], index) => ({
+        id: `override-${index}-${name.replace(/\.cso$/i, "")}`,
+        path: `overrides/${name}`,
+        sha256: digest,
+      }));
+      const candidatePackage = {
+        schemaVersion: 1,
+        packageId: candidateManifest.testVersion,
+        runtime: runtimeEntries,
+        overrides: overrideEntries,
+      };
+      fs.writeFileSync(
+        path.join(stagingDir, "candidate-package.json"),
+        JSON.stringify(candidatePackage, null, 2) + "\n",
+        "utf8",
+      );
+
+      const packageGate = deps.packageGate ?? defaultHelaPackageGate;
+      packageGateReport = await packageGate(stagingDir, { mode: "build" });
+    }
   } else {
     newCandidatesIncluded = entries.filter((e) => e.includedInManifest).length;
   }
@@ -971,11 +1059,19 @@ export async function buildHelaOverrideStage(
     newCandidatesIncluded,
     unmappedRegisterSpaces,
     entries,
+    ...(packageGateReport ? { packageGate: packageGateReport } : {}),
     disclaimer: CANDIDATE_DISCLAIMER,
   };
 
   fs.writeFileSync(reportJsonPath, JSON.stringify(result, null, 2) + "\n", "utf8");
   fs.writeFileSync(reportMarkdownPath, formatStageMarkdown(result), "utf8");
+  if (packageGateReport && !packageGateReport.ok) {
+    throw new Error(
+      `Package gate Hela fallito (staged-only): ${packageGateReport.issues
+        .map((issue) => issue.code)
+        .join(", ")}`,
+    );
+  }
   return result;
 }
 
@@ -1102,6 +1198,7 @@ function formatStageMarkdown(report: BuildHelaStageReport): string {
     `- **Staging dir**: \`${report.stagingDir}\``,
     `- **Overrides dir**: \`${report.overridesDir}\``,
     `- **Manifest candidato**: ${report.manifestPath ? `\`${report.manifestPath}\`` : "(non generato)"}`,
+    `- **Package gate**: ${report.packageGate ? (report.packageGate.ok ? "PASS (staged-only)" : "FAIL (staged-only)") : "non richiesto"}`,
     `- **Override baseline preservati**: ${report.baselineOverridesPreserved}`,
     `- **Nuovi candidati inclusi**: ${report.newCandidatesIncluded}`,
     "",
