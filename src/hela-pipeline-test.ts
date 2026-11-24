@@ -244,7 +244,18 @@ export async function runHelaPipelineTests(): Promise<void> {
       },
     };
     const baselineManifestPath = path.join(baselineDir, "run-manifest.json");
-    fs.writeFileSync(baselineManifestPath, JSON.stringify(baselineManifest, null, 2), "utf8");
+    fs.writeFileSync(
+      baselineManifestPath,
+      Buffer.concat([
+        Buffer.from([0xef, 0xbb, 0xbf]),
+        Buffer.from(JSON.stringify(baselineManifest, null, 2), "utf8"),
+      ]),
+    );
+    assert.equal(
+      readAndValidateManifest(baselineManifestPath).testVersion,
+      baselineManifest.testVersion,
+      "i manifest UTF-8 con BOM generati da PowerShell devono essere leggibili",
+    );
     const invalidProfileManifestPath = path.join(tmp, "invalid-profile-manifest.json");
     fs.writeFileSync(
       invalidProfileManifestPath,
@@ -436,6 +447,50 @@ export async function runHelaPipelineTests(): Promise<void> {
     assert.deepEqual(stagedManifest.requiredOverrides, [baselineCsoName], "requiredOverrides baseline preservati");
     assert.equal(stagedManifest.overrides[`${psIncompleteHash}.cso`], undefined, "pair-incomplete escluso");
     assert.equal(stagedManifest.overrides[`${psConflictHash}.cso`], undefined, "pair-conflict escluso");
+
+    const candidateRuntimeDir = path.join(tmp, "candidate-runtime");
+    fs.mkdirSync(candidateRuntimeDir, { recursive: true });
+    const candidateRuntimeBytes = {
+      d3d12: Buffer.from("candidate d3d12 proxy"),
+      dxgi: Buffer.from("candidate dxgi proxy"),
+    };
+    fs.writeFileSync(path.join(candidateRuntimeDir, "d3d12.dll"), candidateRuntimeBytes.d3d12);
+    fs.writeFileSync(path.join(candidateRuntimeDir, "dxgi.dll"), candidateRuntimeBytes.dxgi);
+    const runtimeStageDir = path.join(tmp, "runtime-replacement-stage");
+    const runtimeStage = await buildHelaOverrideStage(
+      {
+        dumpDir,
+        stagingDir: runtimeStageDir,
+        baselineManifestPath,
+        baselineOverridesDir,
+        runtimeDir: candidateRuntimeDir,
+        testVersion: "1050ti-runtime-candidate",
+        autoDisassemble: false,
+        onlyHashes: ["ffffffffffffffff"],
+      },
+      { fxcPath: () => "unused", dxcPath: () => "unused" },
+    );
+    const runtimeCandidateManifest = JSON.parse(
+      fs.readFileSync(runtimeStage.manifestPath!, "utf8"),
+    ) as HelaRunManifestV1;
+    const runtimePackage = JSON.parse(
+      fs.readFileSync(path.join(runtimeStageDir, "candidate-package.json"), "utf8"),
+    ) as { runtime: Array<{ path: string; sha256: string }> };
+    assert.equal(runtimeCandidateManifest.runtime.d3d12, sha256Buffer(candidateRuntimeBytes.d3d12));
+    assert.equal(runtimeCandidateManifest.runtime.dxgi, sha256Buffer(candidateRuntimeBytes.dxgi));
+    assert.deepEqual(
+      runtimePackage.runtime.map(({ path: runtimePath, sha256 }) => [runtimePath, sha256]),
+      [
+        ["runtime/d3d12.dll", sha256Buffer(candidateRuntimeBytes.d3d12)],
+        ["runtime/dxgi.dll", sha256Buffer(candidateRuntimeBytes.dxgi)],
+      ],
+    );
+    assert.equal(runtimeStage.packageGate?.ok, true);
+    assert.deepEqual(
+      readAndValidateManifest(baselineManifestPath).runtime,
+      baselineManifest.runtime,
+      "l'aggiornamento runtime del candidato non deve modificare il manifest baseline",
+    );
 
     // 6. Test planHelaManifestPatch: preserva baseline + rifiuta percorsi pericolosi
     const deltaStagingOverrides = path.join(tmp, "delta-staging-overrides");

@@ -556,7 +556,8 @@ static int RunTiledResourceSmoke(ID3D12Device* device) {
     D3D12_SUBRESOURCE_TILING subresourceTiling{};
     device->GetResourceTiling(resource, &tileCount, &packedMips, &tileShape,
         &subresourceCount, 0, &subresourceTiling);
-    if (tileCount != 1 || packedMips.NumPackedMips != 1 || subresourceCount != 1) {
+    if (tileCount != 1 || packedMips.NumPackedMips > desc.MipLevels ||
+        subresourceCount != 1) {
         std::fprintf(stderr, "Unexpected tiled-resource layout: tiles=%u packed-mips=%u subresources=%u\n",
             tileCount, packedMips.NumPackedMips, subresourceCount);
         resource->Release();

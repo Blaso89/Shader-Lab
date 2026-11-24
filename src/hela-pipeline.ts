@@ -311,7 +311,8 @@ export function readAndValidateManifest(manifestPath: string): HelaRunManifestV1
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
     throw new Error(`Manifest non trovato: ${resolved}`);
   }
-  const manifest = JSON.parse(fs.readFileSync(resolved, "utf8")) as HelaRunManifestV1;
+  const manifestText = fs.readFileSync(resolved, "utf8").replace(/^\uFEFF/, "");
+  const manifest = JSON.parse(manifestText) as HelaRunManifestV1;
   if (
     manifest.schema !== "hela-run-manifest/v1" ||
     manifest.runtimeAttestation !== "module-and-shader-sha256" ||
@@ -975,9 +976,8 @@ export async function buildHelaOverrideStage(
       requiredOverrides: [...requiredSet].sort(),
       ...(launchProfile ? { launchProfile } : {}),
     };
-    manifestPath = path.join(stagingDir, "run-manifest.candidate.json");
-    fs.writeFileSync(manifestPath, JSON.stringify(candidateManifest, null, 2) + "\n", "utf8");
 
+    const runtimeEntries: Array<{ path: string; sha256: string; bytes: number }> = [];
     if (options.runtimeDir) {
       const runtimeDir = path.resolve(options.runtimeDir);
       assertNotProtectedGamePath(runtimeDir, "runtimeDir");
@@ -987,7 +987,6 @@ export async function buildHelaOverrideStage(
 
       const runtimeOutputDir = path.join(stagingDir, "runtime");
       fs.mkdirSync(runtimeOutputDir, { recursive: true });
-      const runtimeEntries: Array<{ path: string; sha256: string; bytes: number }> = [];
       for (const name of ["d3d12.dll", "dxgi.dll"]) {
         const source = path.join(runtimeDir, name);
         if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
@@ -996,16 +995,16 @@ export async function buildHelaOverrideStage(
         const bytes = fs.readFileSync(source);
         const digest = sha256Buffer(bytes);
         const manifestRole = name === "d3d12.dll" ? "d3d12" : "dxgi";
-        const expectedDigest = candidateManifest.runtime[manifestRole];
-        if (expectedDigest && digest.toLowerCase() !== expectedDigest.toLowerCase()) {
-          throw new Error(
-            `Hash runtime ${name} diverso dal manifest: atteso ${expectedDigest}, trovato ${digest}`,
-          );
-        }
+        candidateManifest.runtime[manifestRole] = digest;
         fs.copyFileSync(source, path.join(runtimeOutputDir, name));
         runtimeEntries.push({ path: `runtime/${name}`, sha256: digest, bytes: bytes.length });
       }
+    }
 
+    manifestPath = path.join(stagingDir, "run-manifest.candidate.json");
+    fs.writeFileSync(manifestPath, JSON.stringify(candidateManifest, null, 2) + "\n", "utf8");
+
+    if (options.runtimeDir) {
       const overrideEntries = Object.entries(sortedOverrides).map(([name, digest], index) => ({
         id: `override-${index}-${name.replace(/\.cso$/i, "")}`,
         path: `overrides/${name}`,

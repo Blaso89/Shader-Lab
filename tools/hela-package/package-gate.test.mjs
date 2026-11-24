@@ -68,6 +68,14 @@ assert.equal(r.inventory.entryCount, 2);
 const check = await runPackageGate(dir, { mode: "check" });
 assert.equal(check.ok, true, JSON.stringify(check.issues));
 });
+test("manifest JSON con BOM UTF-8 è accettato", async (t) => {
+const { dir } = await makeStage(t);
+const manifestPath = path.join(dir, MANIFEST_FILE);
+const manifest = await readFile(manifestPath);
+await writeFile(manifestPath, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), manifest]));
+const result = await runPackageGate(dir);
+assert.equal(result.ok, true, JSON.stringify(result.issues));
+});
 test("runtime DLL mancante: gate fallisce, nessun inventario consumabile", async (t) => {
 const { dir } = await makeStage(t, { overrideFiles: { "overrides/a.dxil": Buffer.from("a") } });
 await rm(path.join(dir, "runtime/dxgi.dll"));

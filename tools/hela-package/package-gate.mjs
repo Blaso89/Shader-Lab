@@ -178,7 +178,7 @@ return finalize();
 report.manifestSha256 = sha256Bytes(manifestRaw);
 let manifest;
 try {
-manifest = JSON.parse(manifestRaw.toString("utf8"));
+manifest = JSON.parse(manifestRaw.toString("utf8").replace(/^\uFEFF/, ""));
 } catch {
 add("MANIFEST_INVALID", "manifest non e' JSON valido");
 return finalize();

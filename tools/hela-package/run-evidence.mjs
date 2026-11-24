@@ -47,7 +47,7 @@ export function bmpNonBlackFraction(buffer) {
 
 async function readJson(absPath) {
   try {
-    return JSON.parse(await readFile(absPath, "utf8"));
+    return JSON.parse((await readFile(absPath, "utf8")).replace(/^\uFEFF/, ""));
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     if (error instanceof SyntaxError) return { __invalidJson: true };

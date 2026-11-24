@@ -103,6 +103,23 @@ test("builds a staged run evidence bundle", async (t) => {
   assert.deepEqual(validateRunEvidence(result.bundle), []);
 });
 
+test("legge i JSON di run PowerShell con BOM UTF-8", async (t) => {
+  const fixture = await makeFixture(t);
+  for (const name of ["run-manifest.json", "manager-run.json", "live-monitor-report.json"]) {
+    const file = path.join(fixture.runDir, name);
+    const contents = await readFile(file);
+    await writeFile(file, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), contents]));
+  }
+  const result = await buildRunEvidence({
+    runDir: fixture.runDir,
+    packageDir: fixture.packageDir,
+    outDir: fixture.outDir,
+    targetPresent: 100,
+  });
+  assert.equal(result.report.ok, true, JSON.stringify(result.report.issues));
+  assert.equal(result.bundle.runId, "T1-100");
+});
+
 test("outDir exists is refused", async (t) => {
   const fixture = await makeFixture(t);
   await mkdir(fixture.outDir, { recursive: true });
