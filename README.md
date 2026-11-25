@@ -208,6 +208,11 @@ i comandi osservati dal proxy ma non dimostra che uno shader abbia contribuito v
 Le chiamate `ExecuteIndirect` rifiutate per range non valido o backing resource indisponibile producono
 log di errore ma nessun record shader, perché il proxy non emette quei comandi.
 Le risposte `CheckFeatureSupport` riportano nomi, valori ed HRESULT nel log.
+Per tracciare il dataflow tra draw e copie, impostare `D3D12ON11_DATAFLOW_TRACE=1`:
+il proxy emette `[DATAFLOW_DRAW]` per draw eseguiti o saltati e `[DATAFLOW_COPY]`
+per le copie osservate, includendo gli identificatori delle risorse validi solo
+all'interno del processo. Il trace è disattivato per default e serve a correlare
+eventi della stessa run; non dimostra causalità né contributo visivo.
 Il proxy traduce in modo limitato texture 2D reserved con layout 64 KB undefined-swizzle e buffer reserved
 row-major, tile pool e mapping/copy delle tile via D3D11.2. Per i buffer tiled il backing D3D11 puo' essere
 piu' piccolo della larghezza virtuale D3D12: il comportamento di tiling/mapping resta da validare sui driver.

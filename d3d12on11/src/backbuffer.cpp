@@ -104,6 +104,10 @@ extern "C" void WINAPI D3D12On11Flush(IUnknown* source) {
     }
 }
 
-extern "C" void WINAPI D3D12On11DumpBackbufferSourceHistory() {
-    DumpBackbufferSourceHistory();
+extern "C" void WINAPI D3D12On11DumpBackbufferSourceHistory(UINT64 readbackPresentCount) {
+    DumpBackbufferSourceHistory(readbackPresentCount);
+}
+
+extern "C" void WINAPI D3D12On11DumpRecentShaderUseEvents(UINT64 readbackPresentCount) {
+    DumpRecentShaderUseEvents(readbackPresentCount);
 }
